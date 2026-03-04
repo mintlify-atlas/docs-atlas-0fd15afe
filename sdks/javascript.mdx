@@ -14,7 +14,7 @@ yarn add glyph-js
 ## Quick Start
 
 ```typescript
-import { g, field, fromJson, emitV2, parsePacked } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Create values programmatically
 const team = g.struct('Team',
@@ -24,7 +24,7 @@ const team = g.struct('Team',
 );
 
 // Emit as GLYPH (no schema needed for loose mode)
-import { canonicalizeLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 const text = canonicalizeLoose(team);
 console.log(text);
 // Output: {id=^t:ARS league=EPL name=Arsenal}
@@ -100,7 +100,7 @@ const parsed = parsePacked(packed, schema);
 ### Value Builders
 
 ```typescript
-import { g, field } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Scalars
 const nullVal = g.null();
@@ -172,7 +172,7 @@ const customText = canonicalizeLooseWithOpts(value, customOpts);
 ### Auto-Tabular Mode
 
 ```typescript
-import { fromJsonLoose, canonicalizeLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const data = [
   { id: 'doc_1', score: 0.95 },
@@ -193,7 +193,7 @@ console.log(text);
 ### V2 Emitter (Auto Mode Selection)
 
 ```typescript
-import { emitV2, fromJson } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Automatically chooses best format (packed/tabular/standard)
 const text = emitV2(value, schema, {
@@ -205,7 +205,7 @@ const text = emitV2(value, schema, {
 ## Schema Builder
 
 ```typescript
-import { SchemaBuilder, t } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const schema = new SchemaBuilder()
   // Struct type
@@ -235,7 +235,7 @@ const packed = emitPacked(team, schema);
 ## Type Specifications
 
 ```typescript
-import { t } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Primitives
 t.null();
@@ -286,7 +286,7 @@ decoder.feed(chunk);
 ## Streaming Validator
 
 ```typescript
-import { StreamingValidator, defaultToolRegistry } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Incremental validation for LLM streaming output
 const validator = new StreamingValidator(defaultToolRegistry);
@@ -307,7 +307,7 @@ if (validator.isComplete()) {
 ## JSON Conversion
 
 ```typescript
-import { fromJson, toJson, normalizeJson } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // JSON → GValue
 const json = { name: 'Alice', age: 30, active: true };
@@ -326,7 +326,7 @@ const normalized = normalizeJson(json);
 ## Comparison and Hashing
 
 ```typescript
-import { equalLoose, fingerprintLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const v1 = fromJsonLoose({ x: 1, y: 2 });
 const v2 = fromJsonLoose({ y: 2, x: 1 });
@@ -343,7 +343,7 @@ console.log(fp1 === fp2);  // true
 ## Decimal128 (High-Precision)
 
 ```typescript
-import { Decimal128, decimal } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Arbitrary-precision decimals (no floating-point errors)
 const price = decimal('99.99');
@@ -388,7 +388,7 @@ const parsedPatch = parsePatch(patchText);
 ### LLM Tool Calls
 
 ```typescript
-import { parseJsonLoose, stringifyJsonLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Agent outputs GLYPH (fewer tokens)
 const toolCall = `{
@@ -407,7 +407,7 @@ const response = stringifyJsonLoose(results);
 ### API Communication
 
 ```typescript
-import { canonicalizeLoose, fromJsonLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Serialize request (30-50% smaller)
 const request = {
@@ -474,7 +474,7 @@ const opts: LooseCanonOpts = {
 
 ```javascript
 // ESM
-import { g, canonicalizeLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // CommonJS
 const { g, canonicalizeLoose } = require('glyph-js');

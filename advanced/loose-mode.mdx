@@ -141,7 +141,7 @@ canonical := glyph.CanonicalizeLoose(gv)
 ```
 
 ```typescript TypeScript
-import { fromJSON, emit } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const data = {action: 'search', limit: 10};
 const gv = fromJSON(data);
@@ -176,7 +176,7 @@ jsonData, err := glyph.ToJSONLoose(gv)
 ```
 
 ```typescript TypeScript
-import { parse, toJSON } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const gv = parse('{action=search limit=10}');
 const jsonData = toJSON(gv);

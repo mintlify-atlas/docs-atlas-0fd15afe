@@ -27,7 +27,7 @@ import {
   StreamingValidator, 
   ToolRegistry, 
   ValidationResult 
-} from 'cowrie-glyph';
+} from 'glyph-js';
 
 // 1. Create tool registry
 const registry = new ToolRegistry();
@@ -82,7 +82,7 @@ for (const token of tokens) {
 Define allowed tools and their argument schemas:
 
 ```typescript
-import { ToolRegistry, ToolSchema, ArgSchema } from 'cowrie-glyph';
+import { ToolRegistry, ToolSchema, ArgSchema } from 'glyph-js';
 
 const registry = new ToolRegistry();
 
@@ -156,7 +156,7 @@ Define argument constraints:
 The validator returns a detailed result on each token:
 
 ```typescript
-import { ValidationResult } from 'cowrie-glyph';
+import { ValidationResult } from 'glyph-js';
 
 const result: ValidationResult = validator.pushToken(token);
 ```
@@ -228,7 +228,7 @@ import {
   DEFAULT_MAX_BUFFER,
   DEFAULT_MAX_FIELDS,
   DEFAULT_MAX_ERRORS 
-} from 'cowrie-glyph';
+} from 'glyph-js';
 
 const limits: ValidatorLimits = {
   maxBufferSize: 1024 * 1024,  // 1MB (default)
@@ -250,7 +250,7 @@ validator.withLimits({
 Validation errors include specific codes:
 
 ```typescript
-import { ErrorCode, ValidationError } from 'cowrie-glyph';
+import { ErrorCode, ValidationError } from 'glyph-js';
 
 for (const error of result.errors) {
   switch (error.code) {
@@ -329,7 +329,7 @@ for (const token of request2Tokens) {
 Use the built-in default registry:
 
 ```typescript
-import { defaultToolRegistry } from 'cowrie-glyph';
+import { defaultToolRegistry } from 'glyph-js';
 
 const registry = defaultToolRegistry();
 // Includes: search, calculate, browse, execute, read_file, write_file
@@ -580,7 +580,7 @@ import {
   StreamingValidator, 
   ToolRegistry,
   defaultToolRegistry 
-} from 'cowrie-glyph';
+} from 'glyph-js';
 import { 
   Reader,
   uiFrame,

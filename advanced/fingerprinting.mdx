@@ -75,7 +75,7 @@ fmt.Println(shortHash)
 ```
 
 ```typescript TypeScript
-import { fingerprintLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const data = {user: 'alice', count: 42};
 const hash = fingerprintLoose(data);
@@ -190,7 +190,7 @@ if actualHash == expectedHash {
 ```
 
 ```typescript TypeScript
-import { fingerprintLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Save checkpoint
 const state = {count: 5, status: 'active'};
@@ -358,7 +358,7 @@ func CachedLLMCall(prompt map[string]interface{}, model string) (string, error) 
 ```
 
 ```typescript TypeScript
-import { fingerprintLoose } from 'glyph-js';
+import { ... } from 'glyph-js';
 import Redis from 'ioredis';
 
 const redis = new Redis();

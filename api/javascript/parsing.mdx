@@ -12,7 +12,7 @@ The GLYPH JavaScript SDK provides parsers to convert GLYPH format strings back t
 Parse packed format (positional encoding) back to GValue:
 
 ```typescript
-import { parsePacked, Schema } from 'cowrie-glyph';
+import { parsePacked, Schema } from 'glyph-js';
 
 const schema = /* your schema */;
 
@@ -69,7 +69,7 @@ const homeName = homeTeam?.fields.find(f => f.key === 'name')?.value.asStr();
 Parse tabular format (optimized for lists) back to GValue:
 
 ```typescript
-import { parseTabular, TabularParseResult } from 'cowrie-glyph';
+import { parseTabular, TabularParseResult } from 'glyph-js';
 
 const input = `
 @tab Team [t n l]
@@ -160,7 +160,7 @@ const text = result.rows[0].get('text')?.asStr();
 Parse GLYPH metadata headers:
 
 ```typescript
-import { parseHeader, Header } from 'cowrie-glyph';
+import { parseHeader, Header } from 'glyph-js';
 
 // Parse header line
 const header1 = parseHeader('@lyph v2.6 @schema#a3f5b2c1 @mode=packed');
@@ -209,7 +209,7 @@ if (header2) {
 Configure parser behavior:
 
 ```typescript
-import { ParseOptions } from 'cowrie-glyph';
+import { ParseOptions } from 'glyph-js';
 
 const options: ParseOptions = {
   schema: schema,      // Schema for type validation
@@ -325,7 +325,7 @@ import {
   Schema,
   SchemaBuilder,
   t 
-} from 'cowrie-glyph';
+} from 'glyph-js';
 
 // Define schema
 const schema = new SchemaBuilder()

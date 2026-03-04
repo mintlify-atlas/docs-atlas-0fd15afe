@@ -86,7 +86,7 @@ newState, err := glyph.ApplyPatch(state, patch)
 ```
 
 ```typescript TypeScript
-import { patch, applyPatch } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Create patch
 const p = patch([
@@ -151,7 +151,7 @@ newState, err := glyph.ApplyPatch(state, patch)
 ```
 
 ```typescript TypeScript
-import { patch, applyPatch } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Append to list
 const p = patch([
@@ -215,7 +215,7 @@ newState, err := glyph.ApplyPatch(state, patch)
 ```
 
 ```typescript TypeScript
-import { patch, applyPatch } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Increment counters
 const p = patch([
@@ -279,7 +279,7 @@ newState, err := glyph.ApplyPatch(state, patch)
 ```
 
 ```typescript TypeScript
-import { patch, applyPatch } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Delete fields
 const p = patch([
@@ -355,7 +355,7 @@ patch := glyph.NewPatchBuilder(target).
 ```
 
 ```typescript TypeScript
-import { PatchBuilder, g } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Base state
 const baseState = {score: 90, events: []};
@@ -422,7 +422,7 @@ func (h *Handler) OnPatch(frame *glyph.Frame, state *glyph.SIDState) error {
 ```
 
 ```typescript TypeScript
-import { handler, fingerprintLoose, parsePatch, applyPatch } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Receiver verifies base hash
 handler.onPatch((sid, seq, payload, state, base) => {
@@ -557,7 +557,7 @@ func UpdateWithRetry(
 ```
 
 ```typescript TypeScript
-import { Writer, fingerprintLoose, patch, BaseMismatchError } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 async function updateWithRetry(
   writer: Writer,

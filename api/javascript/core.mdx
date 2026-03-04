@@ -36,7 +36,7 @@ export type GType =
 Create GValue instances using static constructors:
 
 ```typescript
-import { GValue } from 'cowrie-glyph';
+import { GValue } from 'glyph-js';
 
 // Scalar values
 const nullVal = GValue.null();
@@ -73,7 +73,7 @@ const sumVal = GValue.sum('Ok', GValue.str('success'));
 Use the `g` object for concise value creation:
 
 ```typescript
-import { g, field } from 'cowrie-glyph';
+import { g, field } from 'glyph-js';
 
 // More concise syntax
 const team = g.struct('Team',
@@ -166,7 +166,7 @@ Defines types, fields, and encoding rules for type-safe serialization.
 Create schemas using the fluent builder API:
 
 ```typescript
-import { SchemaBuilder, t } from 'cowrie-glyph';
+import { SchemaBuilder, t } from 'glyph-js';
 
 const schema = new SchemaBuilder()
   .addPackedStruct('Team', 'v2')
@@ -186,7 +186,7 @@ const schema = new SchemaBuilder()
 Define field types using the `t` helper:
 
 ```typescript
-import { t, TypeSpec } from 'cowrie-glyph';
+import { t, TypeSpec } from 'glyph-js';
 
 // Scalar types
 t.null()    // Null
@@ -346,7 +346,7 @@ console.log(canonical);
 Reference IDs are typed identifiers with optional prefix:
 
 ```typescript
-import { RefID } from 'cowrie-glyph';
+import { RefID } from 'glyph-js';
 
 const ref: RefID = {
   prefix: 'user',  // Optional prefix
@@ -361,7 +361,7 @@ const ref: RefID = {
 Map and struct fields are represented as entries:
 
 ```typescript
-import { MapEntry, field } from 'cowrie-glyph';
+import { MapEntry, field } from 'glyph-js';
 
 const entry: MapEntry = {
   key: 'name',
@@ -377,7 +377,7 @@ const entry2 = field('age', g.int(30));
 Struct internal representation:
 
 ```typescript
-import { StructValue } from 'cowrie-glyph';
+import { StructValue } from 'glyph-js';
 
 const struct = value.asStruct();
 const structVal: StructValue = {
@@ -394,7 +394,7 @@ const structVal: StructValue = {
 Sum type internal representation:
 
 ```typescript
-import { SumValue } from 'cowrie-glyph';
+import { SumValue } from 'glyph-js';
 
 const sum = value.asSum();
 const sumVal: SumValue = {
@@ -408,7 +408,7 @@ const sumVal: SumValue = {
 Convert between GValue and JSON:
 
 ```typescript
-import { fromJson, toJson } from 'cowrie-glyph';
+import { fromJson, toJson } from 'glyph-js';
 
 // JSON to GValue
 const json = {

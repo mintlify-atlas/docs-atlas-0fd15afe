@@ -145,7 +145,7 @@ pnpm add glyph-js
 ### Verify Installation
 
 ```typescript
-import { parse, emit, fromJSON, toJSON } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 // Test basic functionality
 const data = { test: 'success', active: true };
@@ -163,7 +163,7 @@ console.log('✓ Installation verified');
 <Tabs>
   <Tab title="Core Functions">
     ```typescript
-    import { parse, emit, fromJSON, toJSON } from 'glyph-js';
+    import { ... } from 'glyph-js';
     
     // JSON conversion
     const gv = fromJSON(data);      // JS → GValue
@@ -177,7 +177,7 @@ console.log('✓ Installation verified');
   
   <Tab title="Value Constructors">
     ```typescript
-    import { g, field } from 'glyph-js';
+    import { ... } from 'glyph-js';
     
     // Primitives
     g.null()
@@ -195,7 +195,7 @@ console.log('✓ Installation verified');
   
   <Tab title="Fingerprinting">
     ```typescript
-    import { fingerprintLoose } from 'glyph-js';
+    import { ... } from 'glyph-js';
     
     const data = { user: 'alice', count: 42 };
     const hash = fingerprintLoose(data);
@@ -209,7 +209,7 @@ console.log('✓ Installation verified');
 GLYPH-JS includes full TypeScript definitions:
 
 ```typescript
-import { GValue, parse } from 'glyph-js';
+import { ... } from 'glyph-js';
 
 const value: GValue = parse('{name=Alice age=30}');
 const name: string | undefined = value.get('name');

@@ -13,15 +13,15 @@ Install the GLYPH JavaScript SDK using your preferred package manager:
 
 <CodeGroup>
 ```bash npm
-npm install cowrie-glyph
+npm install glyph-js
 ```
 
 ```bash yarn
-yarn add cowrie-glyph
+yarn add glyph-js
 ```
 
 ```bash pnpm
-pnpm add cowrie-glyph
+pnpm add glyph-js
 ```
 </CodeGroup>
 
@@ -35,7 +35,7 @@ pnpm add cowrie-glyph
 The SDK is written in TypeScript and includes full type definitions out of the box:
 
 ```typescript
-import { GValue, Schema, SchemaBuilder, t, g, field } from 'cowrie-glyph';
+import { GValue, Schema, SchemaBuilder, t, g, field } from 'glyph-js';
 
 // Full IntelliSense and type checking
 const schema: Schema = new SchemaBuilder()
@@ -55,7 +55,7 @@ import {
   SchemaBuilder, t,
   emitPacked, parsePacked,
   fromJson, toJson,
-} from 'cowrie-glyph';
+} from 'glyph-js';
 
 // 1. Define a schema
 const schema = new SchemaBuilder()
@@ -103,7 +103,7 @@ GLYPH achieves significant token savings over JSON:
 Measure token savings in your own data:
 
 ```typescript
-import { compareTokens } from 'cowrie-glyph';
+import { compareTokens } from 'glyph-js';
 
 const stats = compareTokens(jsonData, schema);
 console.log(`JSON: ${stats.json} tokens`);
@@ -120,7 +120,7 @@ GLYPH supports multiple encoding modes optimized for different use cases:
 Positional encoding with optional bitmap compression:
 
 ```typescript
-import { emitPacked } from 'cowrie-glyph';
+import { emitPacked } from 'glyph-js';
 
 const packed = emitPacked(value, schema);
 // Dense: Team@(^t:ARS Arsenal EPL)
@@ -132,7 +132,7 @@ const packed = emitPacked(value, schema);
 Optimized for lists of structs:
 
 ```typescript
-import { emitTabular } from 'cowrie-glyph';
+import { emitTabular } from 'glyph-js';
 
 const tabular = emitTabular(listValue, schema);
 // @tab Team [t n l]
@@ -146,7 +146,7 @@ const tabular = emitTabular(listValue, schema);
 Named field encoding (v1 compatible):
 
 ```typescript
-import { emit } from 'cowrie-glyph';
+import { emit } from 'glyph-js';
 
 const struct = emit(value, schema, { keyMode: 'name' });
 // Team{id=^t:ARS name=Arsenal league=EPL}
