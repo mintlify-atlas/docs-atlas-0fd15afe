@@ -1,0 +1,600 @@
+---
+title: Batch Data with Tabular Mode
+description: Efficient serialization for embeddings, search results, and bulk operations with 50-70% token savings
+---
+
+Tabular mode is GLYPH's solution for bulk data: `list<struct>` values with homogeneous schemas. It encodes column headers once, then streams rows. Perfect for embeddings, search results, metrics, and dataset streaming.
+
+## Token Savings
+
+Tabular mode provides dramatic token savings for homogeneous lists:
+
+| Data Type | JSON Tokens | GLYPH Tabular | Savings |
+|-----------|-------------|---------------|----------|
+| 10 search results | 320 | 145 | 55% |
+| 100 embeddings | 15,600 | 4,200 | 73% |
+| 50 user records | 1,200 | 480 | 60% |
+| 25 metrics | 580 | 210 | 64% |
+
+<Note>
+Savings increase with row count. Tabular becomes beneficial at ~3+ rows.
+</Note>
+
+## Basic Tabular Format
+
+A simple example:
+
+### JSON (Traditional)
+
+```json
+[
+  {"id": "doc_1", "title": "Introduction to GLYPH", "score": 0.95},
+  {"id": "doc_2", "title": "Streaming Validation", "score": 0.89},
+  {"id": "doc_3", "title": "Agent State Management", "score": 0.84}
+]
+```
+
+### GLYPH Tabular
+
+```
+@tab SearchResult [id score title]
+doc_1 0.95 "Introduction to GLYPH"
+doc_2 0.89 "Streaming Validation"
+doc_3 0.84 "Agent State Management"
+@end
+```
+
+<CardGroup cols={2}>
+  <Card title="JSON" icon="bracket-curly">
+    58 tokens for 3 results
+  </Card>
+  <Card title="GLYPH Tabular" icon="table">
+    34 tokens for 3 results (41% savings)
+  </Card>
+</CardGroup>
+
+## Creating Tabular Data
+
+### From Python Lists
+
+<CodeGroup>
+
+```python Python
+import glyph
+
+# Your data
+search_results = [
+    {"id": "doc_1", "title": "Introduction to GLYPH", "score": 0.95},
+    {"id": "doc_2", "title": "Streaming Validation", "score": 0.89},
+    {"id": "doc_3", "title": "Agent State Management", "score": 0.84},
+    {"id": "doc_4", "title": "Tabular Mode Guide", "score": 0.82},
+    {"id": "doc_5", "title": "JSON Migration Path", "score": 0.78},
+]
+
+# Define schema
+schema = glyph.Schema()
+schema.add_struct("SearchResult",
+    fields={
+        "id": {"type": "str", "wire_key": "i"},
+        "title": {"type": "str", "wire_key": "t"},
+        "score": {"type": "float", "wire_key": "s"},
+    },
+    tabular=True  # Enable tabular mode
+)
+
+# Convert to GValue list
+rows = [glyph.from_json(r, type_name="SearchResult", schema=schema) 
+        for r in search_results]
+
+# Emit as table
+table_text = glyph.emit_tabular(rows, schema)
+print(table_text)
+```
+
+```typescript TypeScript
+import { GValue, Schema, emitTabular } from '@anthropics/glyph';
+
+// Your data
+const searchResults = [
+  { id: 'doc_1', title: 'Introduction to GLYPH', score: 0.95 },
+  { id: 'doc_2', title: 'Streaming Validation', score: 0.89 },
+  { id: 'doc_3', title: 'Agent State Management', score: 0.84 },
+];
+
+// Define schema
+const schema = new Schema();
+schema.addStruct('SearchResult', {
+  fields: [
+    { name: 'id', type: 'str', wireKey: 'i' },
+    { name: 'title', type: 'str', wireKey: 't' },
+    { name: 'score', type: 'float', wireKey: 's' },
+  ],
+  tabular: true,
+});
+
+// Convert to GValue list
+const rows = searchResults.map(r => 
+  GValue.fromJson(r, { schema, typeName: 'SearchResult' })
+);
+
+// Emit as table
+const tableText = emitTabular(GValue.list(...rows), schema);
+console.log(tableText);
+```
+
+</CodeGroup>
+
+### Output
+
+```
+@tab SearchResult [id score title]
+doc_1 0.95 "Introduction to GLYPH"
+doc_2 0.89 "Streaming Validation"
+doc_3 0.84 "Agent State Management"
+doc_4 0.82 "Tabular Mode Guide"
+doc_5 0.78 "JSON Migration Path"
+@end
+```
+
+## RAG with Search Results
+
+Build RAG context with tabular search results:
+
+```python
+import glyph
+
+def build_rag_context(query: str, results: list[dict], max_results: int = 5):
+    """Build RAG context with tabular search results."""
+    
+    top_results = results[:max_results]
+    
+    # Convert to GLYPH tabular format
+    schema = glyph.Schema()
+    schema.add_struct("Document",
+        fields={
+            "id": {"type": "str"},
+            "title": {"type": "str"},
+            "content": {"type": "str"},
+            "score": {"type": "float"},
+        },
+        tabular=True
+    )
+    
+    rows = [glyph.from_json({
+        "id": r["id"],
+        "title": r["title"],
+        "content": r.get("content", "")[:200],  # Truncate
+        "score": r["score"],
+    }, type_name="Document", schema=schema) for r in top_results]
+    
+    docs_table = glyph.emit_tabular(rows, schema)
+    
+    return f"""Query: {query}
+
+Relevant documents:
+{docs_table}
+
+Based on these documents, provide a comprehensive answer."""
+
+# Usage
+query = "What is GLYPH?"
+results = search_engine.search(query)
+context = build_rag_context(query, results)
+
+response = await llm.generate(context)
+```
+
+<Note>
+Tabular format uses 45-55% fewer tokens than JSON for search results, leaving more room for retrieved content.
+</Note>
+
+## Embeddings
+
+Stream embeddings efficiently:
+
+```python
+import glyph
+import numpy as np
+
+def format_embeddings(embeddings: list[np.ndarray], metadata: list[dict]):
+    """Format embeddings with metadata in tabular mode."""
+    
+    schema = glyph.Schema()
+    schema.add_struct("Embedding",
+        fields={
+            "id": {"type": "str"},
+            "text": {"type": "str"},
+            "vector": {"type": "list[float]"},
+        },
+        tabular=True
+    )
+    
+    rows = []
+    for emb, meta in zip(embeddings, metadata):
+        rows.append(glyph.from_json({
+            "id": meta["id"],
+            "text": meta["text"][:50],  # Truncated for display
+            "vector": emb.tolist(),
+        }, type_name="Embedding", schema=schema))
+    
+    return glyph.emit_tabular(rows, schema)
+
+# Generate embeddings
+texts = [
+    "GLYPH is a serialization format",
+    "Streaming validation detects errors early",
+    "Tabular mode saves tokens",
+]
+
+embeddings = [embedding_model.embed(t) for t in texts]
+metadata = [{"id": f"emb_{i}", "text": t} for i, t in enumerate(texts)]
+
+# Format as table
+table = format_embeddings(embeddings, metadata)
+print(table)
+```
+
+### Output
+
+```
+@tab Embedding [id text vector]
+emb_0 "GLYPH is a serialization format" [0.12 0.45 -0.33 ...]
+emb_1 "Streaming validation detects err" [0.08 0.52 -0.28 ...]
+emb_2 "Tabular mode saves tokens" [-0.15 0.38 0.42 ...]
+@end
+```
+
+<Warning>
+For production embeddings (1536+ dimensions), consider storing vectors separately and referencing by ID. Inline embeddings work for small batches and examples.
+</Warning>
+
+## Streaming Rows
+
+Stream rows incrementally as they're generated:
+
+```python
+import glyph
+from glyph import stream
+
+writer = stream.Writer(connection)
+
+# Send table header
+schema = glyph.Schema()
+schema.add_struct("Result",
+    fields={
+        "doc_id": {"type": "str"},
+        "score": {"type": "float"},
+        "status": {"type": "str"},
+    },
+    tabular=True
+)
+
+# Send header frame
+header = "@tab Result [doc_id score status]"
+writer.write_frame(
+    sid=1,
+    seq=0,
+    kind="row",
+    payload=header
+)
+
+# Process documents and stream results
+for i, doc in enumerate(documents):
+    # Process document
+    result = process_document(doc)
+    
+    # Format as row
+    row_glyph = glyph.from_json({
+        "doc_id": doc.id,
+        "score": result.score,
+        "status": result.status,
+    }, type_name="Result", schema=schema)
+    
+    # Send row immediately (don't wait for all results)
+    writer.write_frame(
+        sid=1,
+        seq=i+1,
+        kind="row",
+        payload=glyph.emit(row_glyph)
+    )
+
+# Send footer
+writer.write_frame(
+    sid=1,
+    seq=len(documents)+1,
+    kind="row",
+    payload="@end"
+)
+```
+
+<Steps>
+
+<Step title="Send Header">
+Send `@tab TypeName [col1 col2 ...]` as first frame.
+</Step>
+
+<Step title="Stream Rows">
+Send each row as it's ready. No need to buffer.
+</Step>
+
+<Step title="Send Footer">
+Send `@end` to signal table complete.
+</Step>
+
+</Steps>
+
+## Parsing Tabular Output
+
+Parse tables from LLM output:
+
+```python
+import glyph
+
+def parse_llm_table_output(output: str) -> list[dict]:
+    """Parse LLM output containing a GLYPH table."""
+    
+    # Find table boundaries
+    start = output.find("@tab")
+    end = output.find("@end", start)
+    
+    if start == -1 or end == -1:
+        raise ValueError("No table found in output")
+    
+    # Extract table
+    table_text = output[start:end+4]
+    
+    # Parse
+    table_glyph = glyph.parse(table_text)
+    
+    # Convert to list of dicts
+    result = []
+    for i in range(len(table_glyph)):
+        row = glyph.to_json(table_glyph.index(i))
+        result.append(row)
+    
+    return result
+
+# Example: Ask LLM to return structured data
+prompt = """Analyze these companies and return a table with columns:
+[name sector market_cap growth_rate]
+
+Companies: Apple, Microsoft, Google, Amazon, Meta
+
+Return your analysis as a GLYPH table starting with @tab"""
+
+llm_output = await llm.generate(prompt)
+
+# LLM returns:
+# """
+# Based on my analysis:
+#
+# @tab Company [growth_rate market_cap name sector]
+# 0.08 3.0T Apple Technology
+# 0.12 2.8T Microsoft Technology
+# 0.10 1.9T Google Technology
+# 0.15 1.8T Amazon Consumer/Tech
+# 0.18 1.2T Meta Technology
+# @end
+#
+# Apple leads in market cap while Meta shows highest growth.
+# """
+
+companies = parse_llm_table_output(llm_output)
+for c in companies:
+    print(f"{c['name']}: ${c['market_cap']} market cap, {c['growth_rate']*100:.0f}% growth")
+```
+
+## Metrics and Logs
+
+Stream metrics efficiently:
+
+```python
+import glyph
+from datetime import datetime
+
+def emit_metrics(metrics: list[dict]):
+    """Emit metrics in tabular format."""
+    
+    schema = glyph.Schema()
+    schema.add_struct("Metric",
+        fields={
+            "timestamp": {"type": "time"},
+            "name": {"type": "str"},
+            "value": {"type": "float"},
+            "unit": {"type": "str"},
+        },
+        tabular=True
+    )
+    
+    rows = [glyph.from_json(m, type_name="Metric", schema=schema) 
+            for m in metrics]
+    
+    return glyph.emit_tabular(rows, schema)
+
+# Collect metrics
+metrics = [
+    {"timestamp": datetime.now(), "name": "cpu_usage", "value": 45.2, "unit": "%"},
+    {"timestamp": datetime.now(), "name": "memory_usage", "value": 2048, "unit": "MB"},
+    {"timestamp": datetime.now(), "name": "requests_per_sec", "value": 150.5, "unit": "req/s"},
+    {"timestamp": datetime.now(), "name": "latency_p95", "value": 120, "unit": "ms"},
+]
+
+table = emit_metrics(metrics)
+print(table)
+```
+
+## Wire Key Compression
+
+Use short wire keys for maximum compression:
+
+```python
+import glyph
+
+schema = glyph.Schema()
+schema.add_struct("Document",
+    fields={
+        "document_id": {"type": "str", "wire_key": "d"},
+        "title": {"type": "str", "wire_key": "t"},
+        "content_preview": {"type": "str", "wire_key": "c"},
+        "relevance_score": {"type": "float", "wire_key": "r"},
+        "source_url": {"type": "str", "wire_key": "u"},
+    },
+    tabular=True
+)
+
+# With wire keys, columns are: [d t c r u] instead of full names
+# Saves ~8-12 tokens per row
+```
+
+## Best Practices
+
+<Accordion title="When to Use Tabular Mode">
+
+**Use tabular when:**
+- List has 3+ homogeneous items
+- Items are structs with same schema
+- Token efficiency matters
+- Streaming results incrementally
+
+**Examples:**
+- Search results
+- Embeddings
+- Metrics/logs
+- Dataset rows
+- Batch inference results
+
+**Don't use when:**
+- Heterogeneous data
+- < 3 items (overhead not worth it)
+- Need nested structures (use struct mode)
+
+</Accordion>
+
+<Accordion title="Column Ordering">
+
+Order columns by:
+1. **Identifiers first** (`id`, `doc_id`)
+2. **Important fields** (scores, status)
+3. **Less important fields** (metadata)
+4. **Large fields last** (content, vectors)
+
+This makes tables more readable and allows truncation.
+
+</Accordion>
+
+<Accordion title="Handling Large Vectors">
+
+For large embeddings (1536+ dimensions):
+
+```python
+# Option 1: Store separately and reference
+rows = [{
+    "id": "doc_1",
+    "embedding_ref": "^emb:abc123",  # Reference to blob storage
+    "score": 0.95,
+}]
+
+# Option 2: Truncate for display
+rows = [{
+    "id": "doc_1",
+    "embedding_preview": vector[:8].tolist(),  # First 8 dims
+    "embedding_id": "emb_abc123",
+    "score": 0.95,
+}]
+
+# Option 3: Use GLYPH bytes encoding
+rows = [{
+    "id": "doc_1",
+    "embedding_bytes": vector.tobytes(),  # Binary encoding
+    "score": 0.95,
+}]
+```
+
+</Accordion>
+
+## Complete Example: Document Search
+
+Put it all together:
+
+```python
+import glyph
+from typing import List, Dict
+
+class DocumentSearchFormatter:
+    """Format document search results for LLM context."""
+    
+    def __init__(self):
+        self.schema = glyph.Schema()
+        self.schema.add_struct("SearchResult",
+            fields={
+                "id": {"type": "str", "wire_key": "i"},
+                "title": {"type": "str", "wire_key": "t"},
+                "snippet": {"type": "str", "wire_key": "s"},
+                "score": {"type": "float", "wire_key": "r"},
+                "url": {"type": "str", "wire_key": "u"},
+            },
+            tabular=True
+        )
+    
+    def format_results(self, query: str, results: List[Dict], 
+                      max_results: int = 10) -> str:
+        """Format search results as GLYPH table."""
+        
+        top_results = results[:max_results]
+        
+        # Convert to GValue rows
+        rows = []
+        for r in top_results:
+            rows.append(glyph.from_json({
+                "id": r["id"],
+                "title": r["title"],
+                "snippet": r["content"][:100],  # Truncate
+                "score": r["score"],
+                "url": r.get("url", ""),
+            }, type_name="SearchResult", schema=self.schema))
+        
+        # Emit as table
+        table = glyph.emit_tabular(rows, self.schema, use_wire_keys=True)
+        
+        # Build full context
+        return f"""Search Query: {query}
+
+Top {len(rows)} results:
+{table}
+
+Use these results to answer the user's question."""
+    
+    def parse_llm_citations(self, response: str) -> List[str]:
+        """Extract document IDs cited by LLM."""
+        import re
+        # Look for ^id:doc_N patterns
+        return re.findall(r'\^id:(doc_\w+)', response)
+
+# Usage
+formatter = DocumentSearchFormatter()
+
+# Search
+query = "How does GLYPH streaming validation work?"
+results = search_engine.search(query, top_k=10)
+
+# Format for LLM (uses ~55% fewer tokens than JSON)
+context = formatter.format_results(query, results)
+
+# Get response
+response = await llm.generate(context)
+
+# Extract citations
+cited_docs = formatter.parse_llm_citations(response)
+print(f"LLM cited documents: {cited_docs}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="JSON Interop" icon="arrows-rotate" href="/guides/json-interop">
+    Migrate from JSON or use both formats
+  </Card>
+  <Card title="State Management" icon="database" href="/guides/state-management">
+    Efficient state tracking with patches
+  </Card>
+</CardGroup>

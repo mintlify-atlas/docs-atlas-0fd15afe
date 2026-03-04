@@ -1,0 +1,481 @@
+---
+title: JavaScript/TypeScript SDK
+description: GLYPH codec for JavaScript and TypeScript - token-efficient serialization
+---
+
+## Installation
+
+```bash
+npm install glyph-js
+# or
+yarn add glyph-js
+```
+
+## Quick Start
+
+```typescript
+import { g, field, fromJson, emitV2, parsePacked } from 'glyph-js';
+
+// Create values programmatically
+const team = g.struct('Team',
+  field('id', g.id('t', 'ARS')),
+  field('name', g.str('Arsenal')),
+  field('league', g.str('EPL'))
+);
+
+// Emit as GLYPH (no schema needed for loose mode)
+import { canonicalizeLoose } from 'glyph-js';
+const text = canonicalizeLoose(team);
+console.log(text);
+// Output: {id=^t:ARS league=EPL name=Arsenal}
+```
+
+## Core API
+
+### Loose Mode (Schema-Optional)
+
+```typescript
+import {
+  canonicalizeLoose,
+  fromJsonLoose,
+  toJsonLoose,
+  parseJsonLoose,
+  stringifyJsonLoose
+} from 'glyph-js';
+
+// JSON → GLYPH
+const data = { action: 'search', query: 'weather', max_results: 10 };
+const glyph = stringifyJsonLoose(data);
+console.log(glyph);
+// {action=search max_results=10 query=weather}
+
+// GLYPH → JSON
+const json = parseJsonLoose('{action=search query=test}');
+console.log(json);
+// { action: 'search', query: 'test' }
+
+// Via GValue intermediate
+const gvalue = fromJsonLoose(data);
+const backToJson = toJsonLoose(gvalue);
+```
+
+### Schema Mode (Packed)
+
+```typescript
+import {
+  SchemaBuilder,
+  t,
+  emitPacked,
+  parsePacked,
+  fromJson,
+  toJson
+} from 'glyph-js';
+
+// Define schema
+const schema = new SchemaBuilder()
+  .addPackedStruct('Team', 'v1')
+    .field('id', t.id(), { fid: 1, wireKey: 't' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+    .field('league', t.str(), { fid: 3, wireKey: 'l' })
+  .build();
+
+// Create value
+const team = g.struct('Team',
+  field('id', g.id('t', 'ARS')),
+  field('name', g.str('Arsenal')),
+  field('league', g.str('EPL'))
+);
+
+// Emit with schema (compact wire keys)
+const packed = emitPacked(team, schema);
+console.log(packed);
+// Team@(^t:ARS Arsenal EPL)
+
+// Parse back
+const parsed = parsePacked(packed, schema);
+```
+
+## Building Values
+
+### Value Builders
+
+```typescript
+import { g, field } from 'glyph-js';
+
+// Scalars
+const nullVal = g.null();
+const boolVal = g.bool(true);
+const intVal = g.int(42);
+const floatVal = g.float(3.14);
+const strVal = g.str('hello');
+const bytesVal = g.bytes(new Uint8Array([1, 2, 3]));
+const timeVal = g.time(new Date());
+const idVal = g.id('user', '123');  // ^user:123
+
+// Lists
+const list = g.list(
+  g.int(1),
+  g.int(2),
+  g.int(3)
+);
+
+// Maps
+const map = g.map(
+  field('name', g.str('Alice')),
+  field('age', g.int(30))
+);
+
+// Structs (typed)
+const team = g.struct('Team',
+  field('id', g.id('t', 'ARS')),
+  field('name', g.str('Arsenal'))
+);
+
+// Sum types (tagged unions)
+const result = g.sum('Ok', g.str('success'));
+const error = g.sum('Err', g.str('not found'));
+```
+
+## Emitters
+
+### Loose Canonicalization
+
+```typescript
+import {
+  canonicalizeLoose,
+  canonicalizeLooseWithOpts,
+  defaultLooseCanonOpts,
+  llmLooseCanonOpts,
+  noTabularLooseCanonOpts,
+  NullStyle
+} from 'glyph-js';
+
+// Default: auto-tabular enabled
+const text = canonicalizeLoose(value);
+
+// LLM-optimized (ASCII-safe null, compact)
+const opts = llmLooseCanonOpts();
+const llmText = canonicalizeLooseWithOpts(value, opts);
+
+// Custom options
+const customOpts = {
+  autoTabular: true,
+  minRows: 3,
+  maxCols: 64,
+  allowMissing: true,
+  nullStyle: NullStyle.Underscore  // or NullStyle.Symbol
+};
+
+const customText = canonicalizeLooseWithOpts(value, customOpts);
+```
+
+### Auto-Tabular Mode
+
+```typescript
+import { fromJsonLoose, canonicalizeLoose } from 'glyph-js';
+
+const data = [
+  { id: 'doc_1', score: 0.95 },
+  { id: 'doc_2', score: 0.89 },
+  { id: 'doc_3', score: 0.84 }
+];
+
+const gvalue = fromJsonLoose(data);
+const text = canonicalizeLoose(gvalue);
+console.log(text);
+// @tab _ rows=3 cols=2 [id score]
+// |doc_1|0.95|
+// |doc_2|0.89|
+// |doc_3|0.84|
+// @end
+```
+
+### V2 Emitter (Auto Mode Selection)
+
+```typescript
+import { emitV2, fromJson } from 'glyph-js';
+
+// Automatically chooses best format (packed/tabular/standard)
+const text = emitV2(value, schema, {
+  keyMode: 'compact',  // Use wire keys
+  includeMetadata: true
+});
+```
+
+## Schema Builder
+
+```typescript
+import { SchemaBuilder, t } from 'glyph-js';
+
+const schema = new SchemaBuilder()
+  // Struct type
+  .addPackedStruct('User', 'v1')
+    .field('id', t.id(), { fid: 1, wireKey: 'i' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+    .field('email', t.str(), { fid: 3, wireKey: 'e' })
+    .field('age', t.int(), { fid: 4, wireKey: 'a', optional: true })
+  
+  // Sum type (tagged union)
+  .addSum('Result', 'v1')
+    .variant('Ok', t.ref('User'))
+    .variant('Err', t.str())
+  
+  // Nested struct
+  .addPackedStruct('Team', 'v1')
+    .field('members', t.list(t.ref('User')), { fid: 1, wireKey: 'm' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+  
+  .build();
+
+// Use schema for validation and compact encoding
+const team = fromJson(jsonData, { schema, typeName: 'Team' });
+const packed = emitPacked(team, schema);
+```
+
+## Type Specifications
+
+```typescript
+import { t } from 'glyph-js';
+
+// Primitives
+t.null();
+t.bool();
+t.int();
+t.float();
+t.str();
+t.bytes();
+t.time();
+t.id();
+
+// Containers
+t.list(t.int());           // list<int>
+t.map(t.str(), t.float()); // map<str, float>
+
+// References
+t.ref('TypeName');          // Reference to another type
+
+// Sum (union)
+t.sum('Ok', 'Err');        // Tagged union
+
+// Constraints
+t.str({ minLen: 1, maxLen: 100 });
+t.int({ min: 0, max: 100 });
+t.list(t.str(), { minLen: 1, maxLen: 10 });
+```
+
+## Streaming API
+
+```typescript
+import * as stream from 'glyph-js/stream';
+
+// GS1 stream protocol for real-time updates
+const encoder = new stream.GS1Encoder();
+const decoder = new stream.GS1Decoder();
+
+// Encode frame
+const frame = encoder.encodeFrame(value, { frameId: 1 });
+
+// Decode stream
+decoder.onFrame((frame) => {
+  console.log('Received:', frame.value);
+});
+
+decoder.feed(chunk);
+```
+
+## Streaming Validator
+
+```typescript
+import { StreamingValidator, defaultToolRegistry } from 'glyph-js';
+
+// Incremental validation for LLM streaming output
+const validator = new StreamingValidator(defaultToolRegistry);
+
+// Feed chunks as they arrive
+validator.feed('search(query="');
+validator.feed('weather in');
+validator.feed(' NYC"');
+validator.feed(')');
+
+// Check validation status
+if (validator.isComplete()) {
+  const result = validator.getResult();
+  console.log(result.value);
+}
+```
+
+## JSON Conversion
+
+```typescript
+import { fromJson, toJson, normalizeJson } from 'glyph-js';
+
+// JSON → GValue
+const json = { name: 'Alice', age: 30, active: true };
+const gvalue = fromJson(json);
+
+// GValue → JSON
+const backToJson = toJson(gvalue, {
+  includeTypeMarkers: false,  // Omit $type fields
+  preserveRefs: true          // Keep reference IDs
+});
+
+// Normalize JSON (apply GLYPH semantics)
+const normalized = normalizeJson(json);
+```
+
+## Comparison and Hashing
+
+```typescript
+import { equalLoose, fingerprintLoose } from 'glyph-js';
+
+const v1 = fromJsonLoose({ x: 1, y: 2 });
+const v2 = fromJsonLoose({ y: 2, x: 1 });
+
+// Semantic equality
+console.log(equalLoose(v1, v2));  // true
+
+// Fingerprinting for caching
+const fp1 = fingerprintLoose(v1);
+const fp2 = fingerprintLoose(v2);
+console.log(fp1 === fp2);  // true
+```
+
+## Decimal128 (High-Precision)
+
+```typescript
+import { Decimal128, decimal } from 'glyph-js';
+
+// Arbitrary-precision decimals (no floating-point errors)
+const price = decimal('99.99');
+const tax = decimal('8.875');
+
+const total = price.add(tax);
+console.log(total.toString());  // "108.865"
+
+// Use in GValues
+const amount = g.decimal(price);
+```
+
+## Patch System
+
+```typescript
+import {
+  PatchBuilder,
+  applyPatch,
+  emitPatch,
+  parsePatch,
+  fieldSeg,
+  listIdxSeg
+} from 'glyph-js';
+
+// Build patch
+const patch = new PatchBuilder()
+  .set([fieldSeg('name')], g.str('Bob'))
+  .delete([fieldSeg('age')])
+  .insert([fieldSeg('tags'), listIdxSeg(0)], g.str('new'))
+  .build();
+
+// Apply patch
+const newValue = applyPatch(originalValue, patch);
+
+// Serialize patch
+const patchText = emitPatch(patch);
+const parsedPatch = parsePatch(patchText);
+```
+
+## Real-World Examples
+
+### LLM Tool Calls
+
+```typescript
+import { parseJsonLoose, stringifyJsonLoose } from 'glyph-js';
+
+// Agent outputs GLYPH (fewer tokens)
+const toolCall = `{
+  action=search
+  query="weather in SF"
+  max_results=5
+}`;
+
+const args = parseJsonLoose(toolCall);
+const results = await searchAPI(args.query, args.max_results);
+
+// Return results in GLYPH
+const response = stringifyJsonLoose(results);
+```
+
+### API Communication
+
+```typescript
+import { canonicalizeLoose, fromJsonLoose } from 'glyph-js';
+
+// Serialize request (30-50% smaller)
+const request = {
+  users: [
+    { id: 1, name: 'Alice', score: 95 },
+    { id: 2, name: 'Bob', score: 87 },
+    { id: 3, name: 'Carol', score: 92 }
+  ]
+};
+
+const gvalue = fromJsonLoose(request);
+const compact = canonicalizeLoose(gvalue);
+
+// Auto-tabular saves tokens
+console.log(compact);
+// {users=@tab _ rows=3 cols=3 [id name score]
+// |1|Alice|95|
+// |2|Bob|87|
+// |3|Carol|92|
+// @end}
+```
+
+## TypeScript Types
+
+```typescript
+import type {
+  GValue,
+  GType,
+  RefID,
+  MapEntry,
+  StructValue,
+  SumValue,
+  Schema,
+  TypeDef,
+  FieldDef,
+  LooseCanonOpts,
+  EmitOptions
+} from 'glyph-js';
+
+// Type-safe value construction
+const value: GValue = g.struct('User',
+  field('id', g.int(1)),
+  field('name', g.str('Alice'))
+);
+
+// Options interfaces
+const opts: LooseCanonOpts = {
+  autoTabular: true,
+  minRows: 3,
+  maxCols: 64,
+  allowMissing: true
+};
+```
+
+## Performance Tips
+
+1. **Use loose mode** for maximum flexibility and token efficiency
+2. **Enable auto-tabular** for homogeneous arrays (automatic by default)
+3. **Schema mode** for wire-efficient communication with known types
+4. **Streaming validator** for real-time LLM output validation
+5. **Reuse schema objects** - build once, use many times
+
+## ESM and CommonJS
+
+```javascript
+// ESM
+import { g, canonicalizeLoose } from 'glyph-js';
+
+// CommonJS
+const { g, canonicalizeLoose } = require('glyph-js');
+```

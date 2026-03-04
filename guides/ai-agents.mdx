@@ -1,0 +1,417 @@
+---
+title: AI Agents with GLYPH
+description: Build token-efficient AI agents with GLYPH serialization and streaming validation
+---
+
+GLYPH is purpose-built for AI agents. This guide shows you how to define tools, validate calls as tokens stream, manage state efficiently, and coordinate multi-agent systems.
+
+## Why GLYPH for Agents?
+
+<CardGroup cols={2}>
+  <Card title="40% Token Savings" icon="chart-line">
+    Tool definitions and state use 30-50% fewer tokens than JSON in system prompts and context.
+  </Card>
+  <Card title="Stream Validation" icon="shield-check">
+    Detect invalid tool calls at token 3-5, not after full generation. Cancel immediately.
+  </Card>
+  <Card title="State Verification" icon="fingerprint">
+    Cryptographic proof your patches apply to the expected base state.
+  </Card>
+  <Card title="Human Readable" icon="eye">
+    Debug agent conversations without tools. It's just text.
+  </Card>
+</CardGroup>
+
+## Tool Definitions
+
+### Basic Tool Declaration
+
+Define tools in GLYPH format for your system prompt:
+
+```python
+# System prompt with GLYPH tools
+SYSTEM_PROMPT = """
+You have access to these tools:
+
+search{query:str max_results:int[1..100]=10}
+  Search the web. Returns list of results.
+
+calculate{expression:str}
+  Evaluate a mathematical expression. Returns number.
+
+browse{url:str}
+  Fetch and summarize a webpage. Returns text.
+
+To use a tool, output:
+ToolName{arg1=value arg2=value}
+
+Example:
+search{query="python async tutorial" max_results=5}
+"""
+```
+
+<Note>
+This uses 47% fewer tokens than the equivalent JSON tool definitions.
+</Note>
+
+### With Schema Validation
+
+Add type checking and constraints:
+
+<CodeGroup>
+
+```python Python
+import glyph
+
+registry = glyph.ToolRegistry()
+
+# Register tools with validation
+registry.register("search", {
+    "query": {"type": "str", "required": True, "min_len": 1},
+    "max_results": {"type": "int", "min": 1, "max": 100, "default": 10},
+})
+
+registry.register("calculate", {
+    "expression": {"type": "str", "required": True},
+})
+
+registry.register("browse", {
+    "url": {"type": "str", "required": True, "pattern": r"^https?://"},
+})
+
+# Validate tool call before execution
+tool_call = glyph.parse(model_output)
+result = registry.validate(tool_call)
+
+if not result.valid:
+    return f"Invalid tool call: {result.errors}"
+
+# Execute
+return await execute_tool(tool_call.type_name, tool_call.fields)
+```
+
+```typescript TypeScript
+import { ToolRegistry } from '@anthropics/glyph';
+
+const registry = new ToolRegistry();
+
+// Register tools
+registry.register({
+  name: 'search',
+  description: 'Search the web',
+  args: {
+    query: { type: 'string', required: true, minLen: 1 },
+    max_results: { type: 'int', min: 1, max: 100 },
+  },
+});
+
+registry.register({
+  name: 'calculate',
+  description: 'Evaluate a math expression',
+  args: {
+    expression: { type: 'string', required: true },
+  },
+});
+
+// Validate
+const toolCall = glyph.parse(modelOutput);
+if (!registry.isAllowed(toolCall.typeName)) {
+  throw new Error(`Unknown tool: ${toolCall.typeName}`);
+}
+```
+
+</CodeGroup>
+
+## ReAct Loop Implementation
+
+The classic ReAct pattern (Reason + Act) with GLYPH:
+
+```python
+import glyph
+import asyncio
+
+async def react_loop(goal: str, max_turns: int = 10):
+    """ReAct loop with GLYPH-formatted state."""
+    
+    state = {
+        "goal": goal,
+        "observations": [],
+        "turn": 0,
+    }
+    
+    for turn in range(max_turns):
+        # Format state as GLYPH (compact for context window)
+        state_glyph = glyph.from_json(state)
+        
+        prompt = f"""
+State: {state_glyph}
+
+Think step by step, then either:
+1. Use a tool: ToolName{{args}}
+2. Return final answer: Answer{{result="..."}}
+"""
+        
+        response = await llm.generate(prompt)
+        parsed = glyph.parse(response)
+        
+        # Check if done
+        if parsed.type_name == "Answer":
+            return parsed.fields["result"]
+        
+        # Execute tool
+        result = await execute_tool(parsed.type_name, parsed.fields)
+        
+        # Update state
+        state["observations"].append({
+            "tool": parsed.type_name,
+            "args": parsed.fields,
+            "result": result,
+        })
+        state["turn"] += 1
+    
+    raise MaxTurnsExceeded(f"Failed to complete goal in {max_turns} turns")
+
+# Run
+result = await react_loop("Find the weather in NYC")
+print(result)
+```
+
+<Steps>
+
+<Step title="Format State">
+Convert Python state dict to GLYPH format. This uses ~40% fewer tokens than JSON in the context window.
+</Step>
+
+<Step title="Get LLM Response">
+The model outputs either a tool call or final answer in GLYPH format.
+</Step>
+
+<Step title="Parse & Execute">
+Parse the GLYPH response and execute the tool if needed.
+</Step>
+
+<Step title="Update State">
+Append observation to state and continue the loop.
+</Step>
+
+</Steps>
+
+## Multi-Agent Coordination
+
+Use stream IDs (SID) to multiplex agent communication:
+
+```python
+from glyph import stream
+
+# Assign stream IDs
+PLANNER_SID = 1
+EXECUTOR_SID = 2
+CRITIC_SID = 3
+
+writer = stream.Writer(connection)
+
+# Planner sends task to executor
+writer.write_frame(
+    sid=EXECUTOR_SID,
+    seq=0,
+    kind="doc",
+    payload=glyph.emit(glyph.struct("Task",
+        action="search",
+        query="latest AI news",
+        priority=1,
+    ))
+)
+
+# Executor sends result back to planner
+writer.write_frame(
+    sid=PLANNER_SID,
+    seq=0,
+    kind="doc",
+    payload=glyph.emit(glyph.struct("Result",
+        task_id=1,
+        status="complete",
+        data=search_results,
+    ))
+)
+
+# Critic sends feedback to executor
+writer.write_frame(
+    sid=EXECUTOR_SID,
+    seq=1,
+    kind="doc",
+    payload=glyph.emit(glyph.struct("Feedback",
+        task_id=1,
+        score=0.8,
+        suggestion="Include source URLs",
+    ))
+)
+```
+
+### Message Bus Pattern
+
+For local multi-agent systems:
+
+```python
+import asyncio
+from typing import Dict, Any
+
+class AgentBus:
+    """Message bus for multi-agent communication."""
+    
+    def __init__(self):
+        self.agents: Dict[str, asyncio.Queue] = {}
+        self.handlers: Dict[str, Any] = {}
+    
+    def register(self, agent_id: str, handler):
+        """Register an agent with its message handler."""
+        self.agents[agent_id] = asyncio.Queue()
+        self.handlers[agent_id] = handler
+    
+    async def send(self, from_agent: str, to_agent: str, payload: Any):
+        """Send message to target agent."""
+        msg = glyph.emit(glyph.struct("Message",
+            from_=from_agent,
+            to=to_agent,
+            payload=glyph.from_json(payload),
+        ))
+        await self.agents[to_agent].put(msg)
+    
+    async def run_agent(self, agent_id: str):
+        """Run agent message loop."""
+        queue = self.agents[agent_id]
+        handler = self.handlers[agent_id]
+        
+        while True:
+            msg = await queue.get()
+            parsed = glyph.parse(msg)
+            
+            try:
+                response = await handler(parsed)
+                if response:
+                    await self.send(
+                        agent_id,
+                        parsed.fields["from_"],
+                        response
+                    )
+            except Exception as e:
+                # Send error back
+                await self.send(
+                    agent_id,
+                    parsed.fields["from_"],
+                    {"error": str(e)}
+                )
+
+# Usage
+bus = AgentBus()
+bus.register("planner", planner_handler)
+bus.register("executor", executor_handler)
+
+# Start agents
+await asyncio.gather(
+    bus.run_agent("planner"),
+    bus.run_agent("executor"),
+)
+```
+
+## Checkpoint & Resume
+
+Save and restore agent state:
+
+```python
+import glyph
+from pathlib import Path
+
+def save_checkpoint(agent_state: dict, path: str):
+    """Save agent state to disk."""
+    with open(path, "w") as f:
+        f.write(glyph.from_json(agent_state))
+
+def load_checkpoint(path: str) -> dict:
+    """Load agent state from disk."""
+    with open(path) as f:
+        return glyph.to_json(glyph.parse(f.read()))
+
+# Save periodically
+if state["turn"] % 5 == 0:
+    save_checkpoint(state, f"checkpoint_{state['turn']}.glyph")
+
+# Resume from crash
+try:
+    state = load_checkpoint("checkpoint_latest.glyph")
+    print(f"Resumed from turn {state['turn']}")
+except FileNotFoundError:
+    state = {"goal": goal, "observations": [], "turn": 0}
+```
+
+<Note>
+GLYPH checkpoints are human-readable, so you can inspect them with a text editor.
+</Note>
+
+## Token Savings Comparison
+
+| Pattern | JSON Tokens | GLYPH Tokens | Savings |
+|---------|-------------|--------------|----------|
+| Tool call | 42 | 28 | 33% |
+| Tool list (5 tools) | 180 | 95 | 47% |
+| Agent state (small) | 120 | 75 | 38% |
+| Agent state (large) | 500 | 290 | 42% |
+| ReAct history (10 turns) | 1200 | 680 | 43% |
+
+## Anti-Patterns
+
+<Accordion title="Don't: Parse with Regex">
+
+```python
+# ❌ BAD - breaks on nested structures
+match = re.search(r'search\{query="([^"]+)"', response)
+
+# ✅ GOOD - use the parser
+result = glyph.parse(response)
+```
+
+</Accordion>
+
+<Accordion title="Don't: Validate After Full Generation">
+
+```python
+# ❌ BAD - wastes tokens on invalid calls
+response = await llm.generate(prompt)  # 50 tokens
+result = glyph.parse(response)
+if result.type_name not in allowed_tools:
+    raise Error()  # Discovered too late
+
+# ✅ GOOD - validate as tokens arrive (see next guide)
+validator = glyph.StreamingValidator(registry)
+async for token in llm.stream(prompt):
+    result = validator.push(token)
+    if result.tool_name and not result.tool_allowed:
+        await cancel()  # Stop at token 5
+        break
+```
+
+</Accordion>
+
+<Accordion title="Don't: Send Full State Every Turn">
+
+```python
+# ❌ BAD - O(n) tokens per turn for n observations
+state["observations"].append(new_obs)
+send_full_state(state)  # Gets bigger every turn
+
+# ✅ GOOD - O(1) patches (see state-management guide)
+patch = glyph.patch([('+', 'observations', new_obs)])
+send_patch(patch, base_hash=current_hash)
+```
+
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tool Calling" icon="wrench" href="/guides/tool-calling">
+    Stream validation and constraint checking
+  </Card>
+  <Card title="State Management" icon="database" href="/guides/state-management">
+    Patches and fingerprinting
+  </Card>
+</CardGroup>

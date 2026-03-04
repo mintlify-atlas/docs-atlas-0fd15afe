@@ -1,0 +1,394 @@
+---
+title: Python SDK
+description: GLYPH codec for Python - token-efficient serialization for AI agents
+---
+
+## Installation
+
+```bash
+pip install glyph-codec
+```
+
+## Quick Start
+
+```python
+import glyph
+
+# Convert JSON to GLYPH (30-50% more token-efficient)
+data = {"action": "search", "query": "weather in NYC", "max_results": 10}
+text = glyph.json_to_glyph(data)
+print(text)
+# Output: {action=search max_results=10 query="weather in NYC"}
+
+# Parse GLYPH text back to Python
+value = glyph.parse('{action=search query="test"}')
+print(value.get("action").as_str())  # "search"
+
+# Round-trip: GLYPH ↔ JSON
+json_data = glyph.glyph_to_json(text)
+print(json_data)  # {"action": "search", "max_results": 10, ...}
+```
+
+## Core API
+
+### Parsing
+
+```python
+from glyph import parse, parse_loose
+
+# Parse GLYPH text into GValue
+value = parse('{name=Alice age=30}')
+
+# Tolerant parsing (auto-corrects LLM mistakes)
+value = parse_loose('{name=Alice, age=30,}')  # Extra commas OK
+```
+
+### Emission
+
+```python
+from glyph import emit, canonicalize_loose
+
+# Emit GValue as GLYPH text
+from glyph import g, field
+
+team = g.struct("Team",
+    field("name", g.str("Arsenal")),
+    field("rank", g.int(1))
+)
+
+text = emit(team)
+print(text)  # Team{name=Arsenal rank=1}
+
+# Canonical form (for hashing/comparison)
+canonical = canonicalize_loose(team)
+```
+
+### JSON Bridge
+
+```python
+from glyph import from_json, to_json, json_to_glyph, glyph_to_json
+
+# JSON → GValue
+data = {"status": "ok", "count": 42}
+value = from_json(data)
+
+# GValue → JSON
+json_data = to_json(value)
+
+# Direct conversions
+glyph_text = json_to_glyph({"x": 1, "y": 2})  # {x=1 y=2}
+json_data = glyph_to_json("{x=1 y=2}")        # {"x": 1, "y": 2}
+```
+
+## Building Values
+
+### Using the Builder API
+
+```python
+from glyph import g, field
+
+# Scalars
+null_val = g.null()
+bool_val = g.bool_(True)
+int_val = g.int(42)
+float_val = g.float(3.14)
+str_val = g.str("hello")
+bytes_val = g.bytes_(b"data")
+
+# References (IDs)
+user_id = g.id("user", "123")  # ^user:123
+
+# Containers
+list_val = g.list(
+    g.int(1),
+    g.int(2),
+    g.int(3)
+)
+
+map_val = g.map(
+    field("name", g.str("Alice")),
+    field("age", g.int(30))
+)
+
+# Structs (typed objects)
+team = g.struct("Team",
+    field("id", g.id("t", "ARS")),
+    field("name", g.str("Arsenal")),
+    field("rank", g.int(1))
+)
+
+# Sum types (tagged unions)
+result = g.sum("Ok", g.str("success"))
+error = g.sum("Err", g.str("not found"))
+```
+
+### Using GValue Methods
+
+```python
+from glyph import GValue, MapEntry
+
+# Alternative constructor style
+value = GValue.struct("Match",
+    MapEntry("home", GValue.str_("Arsenal")),
+    MapEntry("away", GValue.str_("Liverpool")),
+    MapEntry("score", GValue.list_(
+        GValue.int_(2),
+        GValue.int_(1)
+    ))
+)
+```
+
+## Accessing Values
+
+```python
+from glyph import parse
+
+value = parse('{name="Alice" age=30 active=t}')
+
+# Type checking
+if value.is_map():
+    print("It's a map!")
+
+# Get nested values
+name = value.get("name").as_str()    # "Alice"
+age = value.get("age").as_int()      # 30
+active = value.get("active").as_bool()  # True
+
+# Lists
+scores = parse('[95 87 92]')
+for item in scores.as_list():
+    print(item.as_int())
+
+# Safe access with defaults
+rank = value.get("rank")  # Returns null GValue if not found
+if not rank.is_null():
+    print(rank.as_int())
+```
+
+## Canonicalization Options
+
+```python
+from glyph import (
+    canonicalize_loose_with_opts,
+    LooseCanonOpts,
+    NullStyle,
+    default_loose_canon_opts,
+    llm_loose_canon_opts,
+    no_tabular_loose_canon_opts
+)
+
+# Default: auto-tabular enabled, _ for null
+opts = default_loose_canon_opts()
+
+# LLM-friendly: ASCII-safe null, optimized for language models
+opts = llm_loose_canon_opts()
+
+# Disable auto-tabular (backward compatibility)
+opts = no_tabular_loose_canon_opts()
+
+# Custom options
+opts = LooseCanonOpts(
+    auto_tabular=True,
+    min_rows=3,
+    max_cols=64,
+    allow_missing=True,
+    null_style=NullStyle.UNDERSCORE  # or NullStyle.SYMBOL (∅)
+)
+
+data = [{"id": "doc_1", "score": 0.95},
+        {"id": "doc_2", "score": 0.89},
+        {"id": "doc_3", "score": 0.84}]
+
+value = from_json(data)
+text = canonicalize_loose_with_opts(value, opts)
+print(text)
+# Auto-tabular output:
+# @tab _ rows=3 cols=2 [id score]
+# |doc_1|0.95|
+# |doc_2|0.89|
+# |doc_3|0.84|
+# @end
+```
+
+## Comparison and Hashing
+
+```python
+from glyph import equal_loose, fingerprint_loose
+
+v1 = parse('{x=1 y=2}')
+v2 = parse('{y=2 x=1}')  # Different order
+
+# Semantic equality (order-independent for maps)
+assert equal_loose(v1, v2)  # True
+
+# Fingerprinting for deduplication
+fp1 = fingerprint_loose(v1)
+fp2 = fingerprint_loose(v2)
+assert fp1 == fp2  # Same fingerprint
+```
+
+## Type Definitions
+
+```python
+from glyph import GValue, GType, RefID, MapEntry, StructValue, SumValue
+
+# Check value type
+value.type == GType.NULL
+value.type == GType.BOOL
+value.type == GType.INT
+value.type == GType.FLOAT
+value.type == GType.STR
+value.type == GType.BYTES
+value.type == GType.TIME
+value.type == GType.ID
+value.type == GType.LIST
+value.type == GType.MAP
+value.type == GType.STRUCT
+value.type == GType.SUM
+
+# Type predicates
+value.is_null()
+value.is_bool()
+value.is_int()
+# ... etc
+
+# Reference IDs
+ref = value.as_id()
+print(ref.prefix)  # "user"
+print(ref.value)   # "123"
+print(ref.full())  # "user:123"
+
+# Structs
+struct = value.as_struct()
+print(struct.type_name)  # "Team"
+for field in struct.fields:
+    print(f"{field.key}: {field.value}")
+
+# Sum types
+sum_val = value.as_sum()
+print(sum_val.tag)    # "Ok"
+print(sum_val.value)  # inner value
+```
+
+## Working with Time
+
+```python
+from glyph import g
+from datetime import datetime, timezone
+
+# Create time values
+now = datetime.now(timezone.utc)
+time_val = g.time(now)
+
+# Parse ISO-8601
+value = parse('2025-12-19T20:00:00Z')
+dt = value.as_time()
+print(dt)  # datetime object
+```
+
+## Real-World Examples
+
+### LLM Tool Call
+
+```python
+import glyph
+
+# Agent outputs GLYPH (30-50% fewer tokens than JSON)
+tool_call = """
+{
+  action=search
+  query="weather in San Francisco"
+  max_results=5
+  confidence=0.95
+}
+"""
+
+# Parse and execute
+args = glyph.parse(tool_call)
+action = args.get("action").as_str()
+query = args.get("query").as_str()
+max_results = args.get("max_results").as_int()
+
+results = search_api(query, max_results)
+
+# Return results in GLYPH
+response = glyph.json_to_glyph(results)
+print(response)
+```
+
+### Data Serialization
+
+```python
+import glyph
+
+# Store compact representations
+data = {
+    "users": [
+        {"id": "u1", "name": "Alice", "score": 95},
+        {"id": "u2", "name": "Bob", "score": 87},
+        {"id": "u3", "name": "Carol", "score": 92}
+    ]
+}
+
+# Auto-tabular saves 35-65% tokens
+compact = glyph.json_to_glyph(data)
+print(compact)
+# {users=@tab _ rows=3 cols=3 [id name score]
+# |u1|Alice|95|
+# |u2|Bob|87|
+# |u3|Carol|92|
+# @end}
+
+# Round-trip perfectly
+restored = glyph.glyph_to_json(compact)
+assert restored == data
+```
+
+### Caching and Deduplication
+
+```python
+import glyph
+
+cache = {}
+
+def get_or_compute(query_value):
+    # Use fingerprint as cache key
+    key = glyph.fingerprint_loose(query_value)
+    
+    if key in cache:
+        return cache[key]
+    
+    result = expensive_computation(query_value)
+    cache[key] = result
+    return result
+```
+
+## Error Handling
+
+Parsing is tolerant by default:
+
+```python
+from glyph import parse, parse_loose
+
+# Both accept common LLM mistakes
+value = parse('{name=Alice, age=30,}')  # Extra commas
+value = parse('{name:Alice age=30}')    # Mixed : and =
+value = parse('{name=Alice age=30')     # Missing closing brace (auto-corrected)
+
+# parse() is equivalent to parse_loose()
+# For strict parsing, use lower-level APIs (not exposed by default)
+```
+
+## Performance Tips
+
+1. **Reuse GValue objects** - builders are lightweight
+2. **Use auto-tabular** - automatic for homogeneous arrays ≥3 rows
+3. **Fingerprinting** - O(n) but efficient for deduplication
+4. **Direct JSON bridge** - `json_to_glyph()` avoids intermediate GValue
+
+## Version
+
+```python
+import glyph
+print(glyph.__version__)  # "1.0.0"
+```

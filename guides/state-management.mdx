@@ -1,0 +1,584 @@
+---
+title: State Management
+description: Efficient agent state tracking with full snapshots, incremental patches, and cryptographic verification
+---
+
+GLYPH provides two approaches for managing agent state: **full state snapshots** for simplicity, and **incremental patches** for long-running agents. Both support cryptographic fingerprinting to ensure state consistency.
+
+## Full State vs Patches
+
+<CardGroup cols={2}>
+  <Card title="Full State" icon="file">
+    Send complete state each turn. Simple, stateless. Good for short conversations.
+  </Card>
+  <Card title="Patches" icon="layer-group">
+    Send only changes. O(1) tokens per update. Essential for long-running agents.
+  </Card>
+</CardGroup>
+
+### Token Cost Comparison
+
+| Approach | Turn 1 | Turn 5 | Turn 10 | Turn 50 |
+|----------|--------|--------|---------|----------|
+| Full state | 75 tokens | 175 tokens | 350 tokens | 1,750 tokens |
+| Patches | 75 tokens | 95 tokens | 110 tokens | 200 tokens |
+
+<Note>
+Patches become essential after ~10 turns when state grows large.
+</Note>
+
+## Simple: Full State Per Message
+
+For short conversations, send the complete state each turn:
+
+```python
+import glyph
+
+# Build agent state
+state = glyph.struct("AgentState",
+    goal="Find weather in NYC",
+    memory=[
+        {"query": "NYC weather", "result": "72F sunny"},
+    ],
+    turn=3,
+)
+
+# Include in context
+context = f"""
+Current state:
+{glyph.emit(state)}
+
+Continue toward the goal.
+"""
+
+# Send to LLM
+response = await llm.generate(context)
+```
+
+### With Python Data Structures
+
+Use `from_json` for seamless conversion:
+
+```python
+import glyph
+
+# Regular Python dict
+state = {
+    "goal": "Find weather in NYC",
+    "memory": [
+        {"query": "NYC weather", "result": "72F sunny"},
+        {"query": "NYC forecast", "result": "Cloudy tomorrow"},
+    ],
+    "turn": 3,
+}
+
+# Convert to GLYPH (38% fewer tokens than JSON)
+state_glyph = glyph.from_json(state)
+print(state_glyph)
+# Output: {goal="Find weather in NYC" memory=[{query="NYC weather" ...}] turn=3}
+
+# Use in prompt
+prompt = f"State: {state_glyph}\n\nNext action?"
+```
+
+## Advanced: Patches with Verification
+
+For long-running agents, send incremental updates:
+
+### Patch Operations
+
+GLYPH supports four patch operations:
+
+<CodeGroup>
+
+```python Set Field
+# Set a field to a new value
+patch = glyph.patch([
+    ("=", "turn", 4),                    # Set turn = 4
+    ("=", "status", "processing"),       # Set status = "processing"
+])
+```
+
+```python Append to List
+# Append to a list field
+patch = glyph.patch([
+    ("+", "memory", new_observation),    # Append to memory list
+])
+```
+
+```python Delete Field
+# Remove a field
+patch = glyph.patch([
+    ("-", "temp_data"),                  # Delete temp_data
+])
+```
+
+```python Delta (Increment)
+# Increment/decrement a numeric field
+patch = glyph.patch([
+    ("~", "token_count", 150),           # Add 150 to token_count
+    ("~", "errors", 1),                  # Increment errors by 1
+])
+```
+
+</CodeGroup>
+
+### Full Example with GS1 Streaming
+
+```python
+from glyph import stream
+import glyph
+
+# Initial state
+state = {
+    "goal": "Find weather in NYC",
+    "memory": [],
+    "turn": 0,
+    "token_count": 0,
+}
+
+# Send initial state
+writer.write_frame(
+    sid=1,
+    seq=0,
+    kind="doc",
+    payload=glyph.from_json(state)
+)
+
+# After each action, send patch instead of full state
+new_observation = {
+    "query": "NYC weather",
+    "result": "72F sunny"
+}
+
+patch = glyph.patch([
+    ("=", "turn", 1),                      # Update turn
+    ("+", "memory", new_observation),       # Append observation
+    ("~", "token_count", 150),             # Increment token count
+])
+
+# Send patch
+writer.write_frame(
+    sid=1,
+    seq=1,
+    kind="patch",
+    payload=glyph.emit_patch(patch)
+)
+```
+
+### Patch Wire Format
+
+Patches are human-readable:
+
+```
+@patch @target=agent:1 @keys=wire
+= turn 1
++ memory {query="NYC weather" result="72F sunny"}
+~ token_count +150
+@end
+```
+
+## Fingerprinting for Safety
+
+Add cryptographic verification to prevent state divergence:
+
+### Computing Fingerprints
+
+A fingerprint is the first 16 hex characters of the SHA-256 hash of the canonical GLYPH form:
+
+```python
+import glyph
+from glyph import stream
+
+# Compute state fingerprint
+state_glyph = glyph.from_json(state)
+fingerprint = stream.state_hash_hex(state_glyph)[:16]
+print(fingerprint)
+# Output: "a1b2c3d4e5f67890"
+```
+
+### Patches with Base Verification
+
+Include the expected base fingerprint in patches:
+
+```python
+from glyph import stream
+
+# Current state
+state = {"turn": 3, "memory": [...]}
+state_glyph = glyph.from_json(state)
+
+# Compute fingerprint
+base_hash = stream.state_hash(state_glyph)
+fingerprint = stream.hash_to_hex(base_hash)[:16]
+
+# Create patch with base verification
+patch = glyph.patch([
+    ("=", "turn", 4),
+    ("+", "memory", new_obs),
+])
+
+# Send with base hash
+writer.write_frame(
+    sid=1,
+    seq=4,
+    kind="patch",
+    payload=glyph.emit_patch(patch),
+    base=fingerprint,  # Receiver verifies this matches their state
+)
+```
+
+<Note>
+If the receiver's state fingerprint doesn't match, the patch is rejected and a full resync is requested.
+</Note>
+
+### Receiver Side
+
+Handle patches with verification:
+
+```python
+from glyph import stream
+import glyph
+
+handler = stream.FrameHandler()
+
+@handler.on_patch
+def handle_patch(sid, seq, payload, state):
+    """Handle patch frame. Base hash already verified by handler."""
+    
+    # Parse patch
+    patch = glyph.parse_patch(payload)
+    
+    # Apply to current state
+    new_state_glyph = glyph.apply_patch(state.value, patch)
+    new_state = glyph.to_json(new_state_glyph)
+    
+    # Update tracked state
+    handler.cursor.set_state(sid, new_state_glyph)
+    
+    return new_state
+
+@handler.on_base_mismatch
+def handle_mismatch(sid, frame):
+    """Called when base hash doesn't match."""
+    logger.warning(f"State mismatch on stream {sid}")
+    logger.warning(f"Expected: {frame.base}")
+    logger.warning(f"Actual: {handler.cursor.get_state_hash(sid)[:16]}")
+    
+    # Request full state resync
+    request_full_state(sid)
+```
+
+### Verification Flow
+
+<Steps>
+
+<Step title="Compute Base">
+Sender computes SHA-256 hash of current state's canonical form.
+</Step>
+
+<Step title="Send Patch">
+Patch includes first 16 hex chars of base hash in `@base=...` directive.
+</Step>
+
+<Step title="Receiver Verifies">
+Receiver computes hash of their current state and compares.
+</Step>
+
+<Step title="Accept or Reject">
+If hashes match, apply patch. If not, reject and request full state.
+</Step>
+
+</Steps>
+
+## Practical Patterns
+
+### Stateful Agent Class
+
+```python
+import glyph
+from glyph import stream
+from typing import Optional
+
+class StatefulAgent:
+    """Agent with verified state updates."""
+    
+    def __init__(self):
+        self.state = {
+            "goal": "",
+            "memory": [],
+            "turn": 0,
+            "token_count": 0,
+        }
+        self._last_hash: Optional[str] = None
+    
+    def checkpoint(self) -> tuple[str, str]:
+        """Create checkpoint with fingerprint."""
+        state_glyph = glyph.from_json(self.state)
+        state_text = glyph.emit(state_glyph)
+        
+        hash_bytes = stream.state_hash_loose_sync(state_glyph)
+        fingerprint = stream.hash_to_hex(hash_bytes)[:16]
+        
+        self._last_hash = fingerprint
+        return state_text, fingerprint
+    
+    def apply_update(self, update_fn, expected_base: Optional[str] = None):
+        """Apply update with optional base verification."""
+        
+        if expected_base and self._last_hash:
+            if expected_base != self._last_hash:
+                raise ValueError(
+                    f"State mismatch - expected {expected_base}, "
+                    f"got {self._last_hash}"
+                )
+        
+        # Apply update
+        update_fn(self.state)
+        
+        # Update hash
+        state_glyph = glyph.from_json(self.state)
+        hash_bytes = stream.state_hash_loose_sync(state_glyph)
+        self._last_hash = stream.hash_to_hex(hash_bytes)[:16]
+    
+    def restore(self, state_text: str, expected_hash: Optional[str] = None):
+        """Restore from checkpoint with verification."""
+        state_glyph = glyph.parse(state_text)
+        
+        if expected_hash:
+            hash_bytes = stream.state_hash_loose_sync(state_glyph)
+            actual_hash = stream.hash_to_hex(hash_bytes)[:16]
+            
+            if actual_hash != expected_hash:
+                raise ValueError(
+                    f"Checkpoint corrupted - expected {expected_hash}, "
+                    f"got {actual_hash}"
+                )
+        
+        self.state = glyph.to_json(state_glyph)
+        self._last_hash = expected_hash
+
+# Usage
+agent = StatefulAgent()
+
+# Update with verification
+def add_observation(state):
+    state["memory"].append({
+        "query": "NYC weather",
+        "result": "72F sunny"
+    })
+    state["turn"] += 1
+
+state_text, hash = agent.checkpoint()
+agent.apply_update(add_observation, expected_base=hash)
+```
+
+### Checkpoint to Disk
+
+```python
+import glyph
+from pathlib import Path
+
+def save_checkpoint(agent_state: dict, path: str):
+    """Save state with fingerprint for integrity check."""
+    state_glyph = glyph.from_json(agent_state)
+    state_text = glyph.emit(state_glyph)
+    
+    # Compute fingerprint
+    from glyph import stream
+    hash_bytes = stream.state_hash_loose_sync(state_glyph)
+    fingerprint = stream.hash_to_hex(hash_bytes)[:16]
+    
+    # Save with fingerprint header
+    with open(path, "w") as f:
+        f.write(f"# GLYPH checkpoint\n")
+        f.write(f"# fingerprint: {fingerprint}\n")
+        f.write(state_text)
+    
+    return fingerprint
+
+def load_checkpoint(path: str, verify: bool = True) -> dict:
+    """Load state and optionally verify fingerprint."""
+    with open(path) as f:
+        lines = f.readlines()
+    
+    # Extract fingerprint from header
+    expected_fingerprint = None
+    for line in lines:
+        if line.startswith("# fingerprint:"):
+            expected_fingerprint = line.split(":")[1].strip()
+            break
+    
+    # Parse state (skip comment lines)
+    state_text = "".join(line for line in lines if not line.startswith("#"))
+    state_glyph = glyph.parse(state_text)
+    
+    # Verify if requested
+    if verify and expected_fingerprint:
+        from glyph import stream
+        hash_bytes = stream.state_hash_loose_sync(state_glyph)
+        actual_fingerprint = stream.hash_to_hex(hash_bytes)[:16]
+        
+        if actual_fingerprint != expected_fingerprint:
+            raise ValueError(
+                f"Checkpoint corrupted! Expected {expected_fingerprint}, "
+                f"got {actual_fingerprint}"
+            )
+    
+    return glyph.to_json(state_glyph)
+
+# Save
+fingerprint = save_checkpoint(agent.state, "checkpoint.glyph")
+print(f"Saved checkpoint with fingerprint {fingerprint}")
+
+# Load and verify
+state = load_checkpoint("checkpoint.glyph", verify=True)
+print(f"Loaded verified state")
+```
+
+### Progress Reporting
+
+Stream progress updates alongside state patches:
+
+```python
+from glyph import stream
+
+writer = stream.Writer(connection)
+
+# Send progress during long operations
+writer.write_frame(
+    sid=1,
+    seq=5,
+    kind="ui",
+    payload=glyph.emit(glyph.struct("Progress",
+        pct=0.45,
+        msg="Processing batch 9 of 20",
+        eta_seconds=120,
+    ))
+)
+
+# Client handles UI updates
+@handler.on_ui
+def handle_ui(sid, seq, payload, state):
+    event = glyph.parse(payload)
+    if event.type_name == "Progress":
+        pct = event.fields["pct"]
+        msg = event.fields["msg"]
+        update_progress_bar(pct, msg)
+```
+
+## Path Operations
+
+Patches support nested paths:
+
+```python
+import glyph
+
+# Update nested field
+patch = glyph.patch([
+    ("=", "config.timeout", 30),           # Set config.timeout = 30
+    ("=", "user.preferences.theme", "dark"), # Set nested field
+])
+
+# Update array element
+patch = glyph.patch([
+    ("=", "memory[0].status", "complete"),  # Update first item
+])
+
+# Append to nested list
+patch = glyph.patch([
+    ("+", "logs", {"level": "info", "msg": "Started"}),
+])
+```
+
+## Best Practices
+
+<Accordion title="When to Use Full State">
+
+**Use full state when:**
+- Conversations are < 10 turns
+- State is small (< 200 tokens)
+- Simplicity > efficiency
+- No concurrent modifications
+
+**Example:** Single-turn tool calls, simple Q&A bots.
+
+</Accordion>
+
+<Accordion title="When to Use Patches">
+
+**Use patches when:**
+- Long-running agents (> 10 turns)
+- State grows over time
+- Multiple agents modify same state
+- Need state verification
+
+**Example:** Research assistants, multi-step planning, collaborative agents.
+
+</Accordion>
+
+<Accordion title="When to Use Fingerprinting">
+
+**Use fingerprinting when:**
+- Multiple agents or services
+- Network communication
+- Critical applications (money, health)
+- Debugging state issues
+
+**Skip when:**
+- Single-process agents
+- Development/testing
+- Performance critical and trusted environment
+
+</Accordion>
+
+## Debugging State Issues
+
+When state diverges:
+
+```python
+from glyph import stream
+import glyph
+
+def debug_state_mismatch(expected_state, actual_state):
+    """Debug why two states don't match."""
+    
+    # Convert to GLYPH canonical form
+    expected_glyph = glyph.from_json(expected_state)
+    actual_glyph = glyph.from_json(actual_state)
+    
+    expected_text = glyph.emit(expected_glyph)
+    actual_text = glyph.emit(actual_glyph)
+    
+    # Compare canonical forms
+    if expected_text == actual_text:
+        print("States are identical in canonical form")
+        return
+    
+    # Show diff
+    import difflib
+    diff = difflib.unified_diff(
+        expected_text.splitlines(),
+        actual_text.splitlines(),
+        lineterm='',
+    )
+    print("\n".join(diff))
+    
+    # Compare fingerprints
+    expected_hash = stream.state_hash_loose_sync(expected_glyph)
+    actual_hash = stream.state_hash_loose_sync(actual_glyph)
+    
+    print(f"\nExpected fingerprint: {stream.hash_to_hex(expected_hash)[:16]}")
+    print(f"Actual fingerprint:   {stream.hash_to_hex(actual_hash)[:16]}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Batch Data" icon="table" href="/guides/batch-data">
+    Handle large datasets with tabular mode
+  </Card>
+  <Card title="JSON Interop" icon="arrows-rotate" href="/guides/json-interop">
+    Migrate from JSON or use both formats
+  </Card>
+</CardGroup>

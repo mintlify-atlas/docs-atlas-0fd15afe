@@ -1,0 +1,200 @@
+---
+title: JavaScript SDK Overview
+description: Token-efficient serialization for LLM communication
+---
+
+# JavaScript SDK Overview
+
+The GLYPH JavaScript SDK provides a token-efficient serialization format optimized for LLM communication. It reduces token usage by 40-60% compared to JSON while maintaining full type safety and schema validation.
+
+## Installation
+
+Install the GLYPH JavaScript SDK using your preferred package manager:
+
+<CodeGroup>
+```bash npm
+npm install cowrie-glyph
+```
+
+```bash yarn
+yarn add cowrie-glyph
+```
+
+```bash pnpm
+pnpm add cowrie-glyph
+```
+</CodeGroup>
+
+## Requirements
+
+- Node.js >= 18.0.0
+- TypeScript >= 5.0 (optional, for TypeScript projects)
+
+## TypeScript Support
+
+The SDK is written in TypeScript and includes full type definitions out of the box:
+
+```typescript
+import { GValue, Schema, SchemaBuilder, t, g, field } from 'cowrie-glyph';
+
+// Full IntelliSense and type checking
+const schema: Schema = new SchemaBuilder()
+  .addPackedStruct('User', 'v1')
+    .field('id', t.id(), { fid: 1, wireKey: 'i' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+  .build();
+```
+
+## Quick Start
+
+Here's a complete example showing the core workflow:
+
+```typescript
+import { 
+  g, field,
+  SchemaBuilder, t,
+  emitPacked, parsePacked,
+  fromJson, toJson,
+} from 'cowrie-glyph';
+
+// 1. Define a schema
+const schema = new SchemaBuilder()
+  .addPackedStruct('Team', 'v2')
+    .field('id', t.id(), { fid: 1, wireKey: 't' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+    .field('league', t.str(), { fid: 3, wireKey: 'l' })
+  .build();
+
+// 2. Create values using constructors
+const team = g.struct('Team',
+  field('id', g.id('t', 'ARS')),
+  field('name', g.str('Arsenal')),
+  field('league', g.str('EPL'))
+);
+
+// 3. Emit as packed GLYPH format
+const packed = emitPacked(team, schema);
+// => "Team@(^t:ARS Arsenal EPL)"
+
+// 4. Parse back to GValue
+const parsed = parsePacked(packed, schema);
+console.log(parsed.get('name')?.asStr()); // => "Arsenal"
+
+// 5. Convert from JSON
+const json = { $type: 'Team', id: '^t:ARS', name: 'Arsenal', league: 'EPL' };
+const fromJsonValue = fromJson(json, { schema, typeName: 'Team' });
+
+// 6. Convert to JSON
+const backToJson = toJson(fromJsonValue, { includeTypeMarkers: true });
+```
+
+## Token Savings
+
+GLYPH achieves significant token savings over JSON:
+
+| Data Type | Token Savings |
+|-----------|---------------|
+| LLM messages | 40% |
+| Tool calls | 42% |
+| Conversations (25 msgs) | 49% |
+| Search results (50 rows) | 52% |
+| Batch tool results | 62% |
+
+Measure token savings in your own data:
+
+```typescript
+import { compareTokens } from 'cowrie-glyph';
+
+const stats = compareTokens(jsonData, schema);
+console.log(`JSON: ${stats.json} tokens`);
+console.log(`GLYPH: ${stats.lyph} tokens`);
+console.log(`Savings: ${stats.savingsPercent.toFixed(1)}%`);
+```
+
+## Encoding Modes
+
+GLYPH supports multiple encoding modes optimized for different use cases:
+
+### Packed Mode
+
+Positional encoding with optional bitmap compression:
+
+```typescript
+import { emitPacked } from 'cowrie-glyph';
+
+const packed = emitPacked(value, schema);
+// Dense: Team@(^t:ARS Arsenal EPL)
+// Sparse: Match@{bm=0b101}(^m:123 2025-12-19T20:00:00Z 2 1)
+```
+
+### Tabular Mode
+
+Optimized for lists of structs:
+
+```typescript
+import { emitTabular } from 'cowrie-glyph';
+
+const tabular = emitTabular(listValue, schema);
+// @tab Team [t n l]
+// ^t:ARS Arsenal EPL
+// ^t:LIV Liverpool EPL
+// @end
+```
+
+### Struct Mode
+
+Named field encoding (v1 compatible):
+
+```typescript
+import { emit } from 'cowrie-glyph';
+
+const struct = emit(value, schema, { keyMode: 'name' });
+// Team{id=^t:ARS name=Arsenal league=EPL}
+```
+
+## Core Concepts
+
+### GValue
+
+The universal value container for all GLYPH data. See [Core Types](/api/javascript/core) for details.
+
+### Schema
+
+Defines types, fields, and encoding rules. See [Core Types](/api/javascript/core#schema) for details.
+
+### Parsing
+
+Converts GLYPH format strings back to GValue objects. See [Parsing](/api/javascript/parsing) for details.
+
+### Streaming
+
+Incremental validation for real-time LLM tool calls. See [Streaming](/api/javascript/streaming) for details.
+
+## API Organization
+
+The JavaScript SDK is organized into several modules:
+
+- **Core**: GValue, Schema, type constructors
+- **JSON**: JSON conversion utilities
+- **Emit**: GLYPH format encoders
+- **Parse**: GLYPH format parsers
+- **Stream**: Streaming transport (GS1) and validation
+- **Patch**: Delta encoding for updates
+- **Loose**: Schema-optional mode
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Types" icon="cube" href="/api/javascript/core">
+    Learn about GValue, Schema, and type constructors
+  </Card>
+  <Card title="Parsing" icon="code" href="/api/javascript/parsing">
+    Parse GLYPH format strings
+  </Card>
+  <Card title="Streaming" icon="stream" href="/api/javascript/streaming">
+    Real-time validation and GS1 transport
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/Neumenon/glyph/tree/main/js">
+    View source and examples
+  </Card>
+</CardGroup>

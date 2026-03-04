@@ -1,0 +1,551 @@
+---
+title: JSON Interoperability
+description: Migrate from JSON gradually, use both formats, and understand conversion gotchas
+---
+
+GLYPH is designed for seamless JSON interoperability. You can convert back and forth, use GLYPH as a drop-in JSON replacement, or gradually migrate your codebase.
+
+## Drop-in JSON Replacement
+
+The simplest approach: convert at the boundaries.
+
+<CodeGroup>
+
+```python Python
+import glyph
+import json
+
+# Your existing code uses JSON
+user_data = {
+    "id": "user_123",
+    "name": "Alice Chen",
+    "email": "alice@example.com",
+    "preferences": {
+        "theme": "dark",
+        "notifications": True,
+    },
+    "tags": ["premium", "beta-tester"],
+}
+
+# Convert to GLYPH (one line change)
+glyph_text = glyph.from_json(user_data)
+print("GLYPH output:")
+print(glyph_text)
+# {email=alice@example.com id=user_123 name="Alice Chen" ...}
+
+# Compare sizes
+json_text = json.dumps(user_data)
+print(f"\nJSON:  {len(json_text)} chars")
+print(f"GLYPH: {len(glyph_text)} chars")
+print(f"Reduction: {100 * (1 - len(glyph_text)/len(json_text)):.1f}%")
+
+# Convert back (identical to original)
+restored = glyph.to_json(glyph.parse(glyph_text))
+assert restored == user_data
+```
+
+```typescript TypeScript
+import { fromJson, toJson, parse } from '@anthropics/glyph';
+
+// Your existing JSON data
+const userData = {
+  id: 'user_123',
+  name: 'Alice Chen',
+  email: 'alice@example.com',
+  preferences: {
+    theme: 'dark',
+    notifications: true,
+  },
+  tags: ['premium', 'beta-tester'],
+};
+
+// Convert to GLYPH
+const glyphText = fromJson(userData);
+console.log('GLYPH output:');
+console.log(glyphText);
+
+// Compare sizes
+const jsonText = JSON.stringify(userData);
+console.log(`\nJSON:  ${jsonText.length} chars`);
+console.log(`GLYPH: ${glyphText.length} chars`);
+console.log(`Reduction: ${(100 * (1 - glyphText.length/jsonText.length)).toFixed(1)}%`);
+
+// Convert back
+const restored = toJson(parse(glyphText));
+console.assert(JSON.stringify(restored) === JSON.stringify(userData));
+```
+
+</CodeGroup>
+
+## Bidirectional Conversion
+
+GLYPH supports lossless round-trip conversion:
+
+```python
+import glyph
+
+# JSON → GLYPH → JSON (lossless)
+original = {
+    "name": "Bob",
+    "age": 30,
+    "active": True,
+    "scores": [95, 87, 92],
+    "metadata": None,
+}
+
+glyph_form = glyph.from_json(original)
+restored = glyph.to_json(glyph.parse(glyph_form))
+
+assert restored == original  # ✓ Identical
+```
+
+### Supported Types
+
+| JSON Type | GLYPH Type | Example |
+|-----------|------------|----------|
+| `null` | `∅` | `null` → `∅` |
+| `true` / `false` | `t` / `f` | `true` → `t` |
+| Number (int) | `42` | `42` → `42` |
+| Number (float) | `3.14` | `3.14` → `3.14` |
+| String | `hello` or `"hello"` | `"hello"` → `hello` |
+| Array | `[...]` | `[1, 2, 3]` → `[1 2 3]` |
+| Object | `{...}` | `{"a": 1}` → `{a=1}` |
+
+<Note>
+GLYPH automatically determines if strings need quotes. Bare strings (unquoted) are used when safe.
+</Note>
+
+## Gradual Migration Pattern
+
+Migrate your codebase incrementally:
+
+```python
+import glyph
+import json
+
+def serialize(data: dict, use_glyph: bool = False) -> str:
+    """Wrapper for gradual migration."""
+    if use_glyph:
+        return glyph.from_json(data)
+    return json.dumps(data)
+
+def deserialize(text: str) -> dict:
+    """Auto-detect format and parse."""
+    text = text.strip()
+    
+    # Check if it looks like GLYPH
+    if text.startswith("{") and "=" in text[:50]:
+        # GLYPH format: {key=value ...}
+        return glyph.to_json(glyph.parse(text))
+    
+    # Default to JSON
+    return json.loads(text)
+
+# Works with both formats
+data1 = deserialize('{"name": "Bob"}')
+data2 = deserialize('{name=Bob}')
+assert data1 == data2
+```
+
+### Migration Strategy
+
+<Steps>
+
+<Step title="Start with Hot Paths">
+Migrate LLM context building first. This is where token savings matter most.
+
+```python
+def build_llm_context(user: dict, history: list[dict]) -> str:
+    # Changed: Use GLYPH instead of JSON
+    return f"""User: {glyph.from_json(user)}
+
+History:
+{chr(10).join(glyph.from_json(h) for h in history)}
+"""
+```
+</Step>
+
+<Step title="Add Auto-detection">
+Update parsers to handle both formats.
+
+```python
+def parse_response(text: str) -> dict:
+    try:
+        return glyph.to_json(glyph.parse(text))
+    except:
+        return json.loads(text)
+```
+</Step>
+
+<Step title="Migrate Storage">
+Update file I/O and database serialization.
+
+```python
+def save_checkpoint(state: dict, path: str):
+    with open(path, "w") as f:
+        f.write(glyph.from_json(state))  # Changed from json.dumps
+
+def load_checkpoint(path: str) -> dict:
+    with open(path) as f:
+        return glyph.to_json(glyph.parse(f.read()))  # Changed from json.loads
+```
+</Step>
+
+<Step title="Update Tests">
+Test both formats during transition.
+
+```python
+@pytest.mark.parametrize("format", ["json", "glyph"])
+def test_serialization(format):
+    data = {"name": "Alice", "age": 30}
+    
+    if format == "json":
+        text = json.dumps(data)
+        restored = json.loads(text)
+    else:
+        text = glyph.from_json(data)
+        restored = glyph.to_json(glyph.parse(text))
+    
+    assert restored == data
+```
+</Step>
+
+</Steps>
+
+## LLM Context Builder
+
+Optimize LLM context window:
+
+```python
+import glyph
+from typing import List, Dict
+
+class ContextBuilder:
+    """Build LLM context with GLYPH for token savings."""
+    
+    def __init__(self, use_glyph: bool = True):
+        self.use_glyph = use_glyph
+    
+    def build_user_context(self, user: Dict) -> str:
+        """Format user data."""
+        if self.use_glyph:
+            return f"User: {glyph.from_json(user)}"
+        return f"User: {json.dumps(user)}"
+    
+    def build_history_context(self, history: List[Dict]) -> str:
+        """Format conversation history."""
+        if self.use_glyph:
+            lines = [glyph.from_json(h) for h in history]
+            return "History:\n" + "\n".join(lines)
+        return "History:\n" + json.dumps(history, indent=2)
+    
+    def build_full_context(self, user: Dict, history: List[Dict], 
+                          system: str) -> str:
+        """Build complete context."""
+        parts = [
+            system,
+            self.build_user_context(user),
+            self.build_history_context(history),
+        ]
+        return "\n\n".join(parts)
+
+# Usage
+builder = ContextBuilder(use_glyph=True)
+
+user = {
+    "id": "user_123",
+    "name": "Alice",
+    "preferences": {"language": "en", "timezone": "UTC"},
+}
+
+history = [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi! How can I help?"},
+]
+
+context = builder.build_full_context(user, history, "You are a helpful assistant.")
+
+# Compare token counts
+context_json = ContextBuilder(use_glyph=False).build_full_context(user, history, "You are a helpful assistant.")
+
+print(f"GLYPH context: ~{len(context.split())} tokens")
+print(f"JSON context:  ~{len(context_json.split())} tokens")
+print(f"Savings: {100 * (1 - len(context)/len(context_json)):.0f}%")
+```
+
+## Type Markers
+
+Preserve type information during conversion:
+
+```python
+import glyph
+from datetime import datetime
+
+# With type markers
+data = {
+    "id": "^user:123",  # Reference ID
+    "created_at": datetime.now(),  # Timestamp
+    "avatar": b"\x89PNG...",  # Binary data
+}
+
+# Convert to GLYPH (preserves types)
+glyph_text = glyph.from_json(data, options={
+    "parse_refs": True,
+    "parse_dates": True,
+})
+
+# Parse back (types preserved)
+restored = glyph.to_json(glyph.parse(glyph_text), options={
+    "format_dates": True,
+    "compact_refs": True,
+})
+
+print(type(restored["id"]))         # str (with ^ prefix)
+print(type(restored["created_at"])) # datetime
+print(type(restored["avatar"]))     # bytes
+```
+
+## Gotchas and Best Practices
+
+<Accordion title="Key Ordering">
+
+GLYPH emits keys in alphabetical order for consistency:
+
+```python
+json_obj = {"z": 1, "a": 2, "m": 3}
+glyph_text = glyph.from_json(json_obj)
+print(glyph_text)
+# Output: {a=2 m=3 z=1}
+
+# When parsed back, order is preserved
+restored = glyph.to_json(glyph.parse(glyph_text))
+# restored == {"a": 2, "m": 3, "z": 1}
+```
+
+**Best practice:** Don't rely on key order in either format.
+
+</Accordion>
+
+<Accordion title="Number Precision">
+
+GLYPH preserves integer vs float distinction:
+
+```python
+data = {"int": 42, "float": 42.0}
+
+# JSON loses int/float distinction
+json_text = json.dumps(data)
+json_restored = json.loads(json_text)
+print(json_restored)  # {"int": 42, "float": 42.0}
+
+# GLYPH preserves it
+glyph_text = glyph.from_json(data)
+print(glyph_text)  # {float=42.0 int=42}
+glyph_restored = glyph.to_json(glyph.parse(glyph_text))
+print(glyph_restored)  # {"float": 42.0, "int": 42}
+```
+
+**Best practice:** Be explicit about float types when precision matters.
+
+</Accordion>
+
+<Accordion title="Null vs Undefined">
+
+GLYPH treats `null` explicitly:
+
+```python
+# JSON: null is explicit
+json_data = {"value": None}
+json_text = json.dumps(json_data)  # {"value": null}
+
+# GLYPH: null represented as ∅
+glyph_text = glyph.from_json(json_data)  # {value=∅}
+
+# Both round-trip correctly
+assert glyph.to_json(glyph.parse(glyph_text)) == json_data
+```
+
+**Best practice:** Use explicit `null` for optional fields.
+
+</Accordion>
+
+<Accordion title="String Escaping">
+
+GLYPH uses bare strings when possible:
+
+```python
+data = {
+    "simple": "hello",           # No quotes needed
+    "with_space": "hello world", # Quotes needed
+    "special": "hello\nworld",   # Quotes + escaping
+}
+
+glyph_text = glyph.from_json(data)
+print(glyph_text)
+# {simple=hello special="hello\nworld" with_space="hello world"}
+```
+
+**Best practice:** Let GLYPH handle quoting automatically.
+
+</Accordion>
+
+<Accordion title="Large Numbers">
+
+Both formats handle large numbers:
+
+```python
+data = {"big": 9007199254740991}  # JavaScript MAX_SAFE_INTEGER
+
+# JSON
+json_text = json.dumps(data)
+print(json_text)  # {"big": 9007199254740991}
+
+# GLYPH
+glyph_text = glyph.from_json(data)
+print(glyph_text)  # {big=9007199254740991}
+
+# Both restore correctly (in Python)
+json_restored = json.loads(json_text)
+glyph_restored = glyph.to_json(glyph.parse(glyph_text))
+assert json_restored == glyph_restored == data
+```
+
+**Warning:** JavaScript has different numeric limits than Python. Test cross-language scenarios.
+
+</Accordion>
+
+## API Response Wrapper
+
+Wrap API responses with format negotiation:
+
+```python
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+import glyph
+
+app = FastAPI()
+
+class GLYPHResponse(Response):
+    media_type = "application/glyph"
+    
+    def render(self, content: any) -> bytes:
+        return glyph.from_json(content).encode('utf-8')
+
+@app.get("/users/{user_id}")
+async def get_user(user_id: str, request: Request):
+    user = get_user_from_db(user_id)
+    
+    # Check Accept header
+    accept = request.headers.get("Accept", "")
+    
+    if "application/glyph" in accept:
+        return GLYPHResponse(content=user)
+    else:
+        return JSONResponse(content=user)
+
+# Client usage
+import httpx
+
+# Request GLYPH format
+response = httpx.get(
+    "http://api.example.com/users/123",
+    headers={"Accept": "application/glyph"}
+)
+
+if response.headers["content-type"] == "application/glyph":
+    user = glyph.to_json(glyph.parse(response.text))
+else:
+    user = response.json()
+```
+
+## Testing Compatibility
+
+Test JSON compatibility:
+
+```python
+import pytest
+import glyph
+import json
+
+@pytest.mark.parametrize("test_case", [
+    {"simple": "value"},
+    {"nested": {"key": "value"}},
+    {"list": [1, 2, 3]},
+    {"mixed": {"str": "hello", "int": 42, "bool": True, "null": None}},
+    {"complex": {"users": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]}},
+])
+def test_json_roundtrip(test_case):
+    """Test JSON → GLYPH → JSON roundtrip."""
+    
+    # Convert to GLYPH
+    glyph_text = glyph.from_json(test_case)
+    
+    # Parse back
+    restored = glyph.to_json(glyph.parse(glyph_text))
+    
+    # Should be identical
+    assert restored == test_case
+
+def test_token_savings():
+    """Verify token savings."""
+    
+    test_data = {
+        "user": "alice",
+        "action": "search",
+        "query": "weather in NYC",
+        "max_results": 10,
+        "filters": {"type": "forecast"},
+    }
+    
+    json_text = json.dumps(test_data)
+    glyph_text = glyph.from_json(test_data)
+    
+    savings = 1 - len(glyph_text) / len(json_text)
+    
+    print(f"JSON:  {len(json_text)} chars")
+    print(f"GLYPH: {len(glyph_text)} chars")
+    print(f"Savings: {savings*100:.1f}%")
+    
+    assert savings > 0.3  # At least 30% savings
+```
+
+## Migration Checklist
+
+<Steps>
+
+<Step title="Identify Hot Paths">
+Find code that builds LLM context or processes large JSON payloads.
+</Step>
+
+<Step title="Add Conversion Functions">
+Implement `serialize()` and `deserialize()` wrappers with auto-detection.
+</Step>
+
+<Step title="Update LLM Code">
+Change context builders to use GLYPH.
+</Step>
+
+<Step title="Test Both Formats">
+Ensure compatibility during transition period.
+</Step>
+
+<Step title="Monitor Token Usage">
+Verify token savings in production.
+</Step>
+
+<Step title="Complete Migration">
+Remove JSON fallbacks once stable.
+</Step>
+
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AI Agents" icon="robot" href="/guides/ai-agents">
+    Build token-efficient agents
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/reference">
+    Complete API documentation
+  </Card>
+</CardGroup>

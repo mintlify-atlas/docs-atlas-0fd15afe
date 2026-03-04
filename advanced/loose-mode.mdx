@@ -1,0 +1,291 @@
+---
+title: "Loose Mode"
+description: "Schema-optional GLYPH for flexible JSON-like data with deterministic canonical form"
+---
+
+## Overview
+
+GLYPH-Loose is the **schema-optional subset** of GLYPH. It provides a deterministic canonical representation for JSON-like data, making it ideal for:
+
+- Hashing and fingerprinting
+- Caching with stable keys
+- Cross-language interoperability
+- Drop-in JSON replacement
+
+**Key benefit:** Any valid JSON is valid GLYPH-Loose input, producing **40-60% fewer tokens** than equivalent JSON.
+
+## Design Goals
+
+<CardGroup cols={2}>
+  <Card title="Drop-in JSON Replacement" icon="repeat">
+    Any valid JSON is valid GLYPH-Loose input
+  </Card>
+  <Card title="Deterministic Canonical Form" icon="fingerprint">
+    Same data always produces identical output
+  </Card>
+  <Card title="Cross-Language Parity" icon="globe">
+    Go, JS, and Python implementations produce byte-identical results
+  </Card>
+  <Card title="Compact" icon="compress">
+    More token-efficient than JSON for LLM contexts
+  </Card>
+</CardGroup>
+
+## Canonical Rules
+
+### Scalars
+
+| Type | Canonical Form | Examples |
+|------|----------------|----------|
+| null | `_` | `_` (accepts `∅`, `null` on input) |
+| bool | `t` / `f` | `t`, `f` |
+| int | Decimal, no leading zeros | `0`, `42`, `-100` |
+| float | Shortest roundtrip, `e` (not `E`) | `3.14`, `1e-06`, `1e+15` |
+| string | Bare if safe, else quoted | `hello`, `"hello world"` |
+
+### Float Formatting
+
+- **Zero:** Always `0` (not `-0`, not `0.0`)
+- **Negative zero:** Canonicalizes to `0`
+- **Exponent threshold:** Use exponential when `exp < -4` or `exp >= 15`
+- **Exponent format:** 2-digit minimum (`1e-06`, not `1e-6`)
+- **NaN/Infinity:** Rejected with error (not JSON-compatible)
+
+### String Bare-Safe Rule
+
+A string is "bare-safe" (unquoted) if:
+
+1. Non-empty
+2. First character: Unicode letter or `_`
+3. Remaining characters: Unicode letter, digit, `_`, `-`, `.`, `/`
+4. Not a reserved word: `t`, `f`, `true`, `false`, `null`, `none`, `nil`
+
+Otherwise, the string is quoted with minimal escapes.
+
+**Examples:**
+```glyph
+hello          # Bare-safe
+user_name      # Bare-safe
+api/v2/users   # Bare-safe
+"hello world"  # Contains space - quoted
+"42"           # Looks like number - quoted
+```
+
+### Containers
+
+| Type | Canonical Form |
+|------|----------------|
+| list | `[` + space-separated elements + `]` |
+| map | `{` + sorted key=value pairs + `}` |
+
+**Examples:**
+```glyph
+[]
+[1 2 3]
+[_ t 42 hello]
+{}
+{a=1}
+{a=1 b=2 c=3}
+```
+
+### Key Ordering
+
+Map keys are sorted by **bytewise UTF-8 comparison** of their canonical string form.
+
+```glyph
+# Input
+{"b":1,"a":2,"aa":3,"A":4,"_":5}
+
+# Output
+{A=4 _=5 a=2 aa=3 b=1}
+```
+
+UTF-8 byte order: `A` (0x41) < `_` (0x5F) < `a` (0x61) < ...
+
+### Duplicate Keys
+
+**Last-wins policy:** When a JSON object has duplicate keys, the last value is used.
+
+```glyph
+# Input
+{"k":1,"k":2,"k":3}
+
+# Output
+{k=3}
+```
+
+## JSON Bridge
+
+### Input (JSON → GLYPH)
+
+<CodeGroup>
+```python Python
+import glyph
+
+json_bytes = b'{"action":"search","limit":10}'
+gv = glyph.from_json_loose(json_bytes)
+print(glyph.emit(gv))
+# {action=search limit=10}
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+jsonData := []byte(`{"action":"search","limit":10}`)
+gv, err := glyph.FromJSONLoose(jsonData)
+if err != nil {
+    log.Fatal(err)
+}
+canonical := glyph.CanonicalizeLoose(gv)
+// {action=search limit=10}
+```
+
+```typescript TypeScript
+import { fromJSON, emit } from 'glyph-js';
+
+const data = {action: 'search', limit: 10};
+const gv = fromJSON(data);
+const canonical = emit(gv);
+// {action=search limit=10}
+```
+</CodeGroup>
+
+**Behavior:**
+- Accepts any valid JSON
+- Rejects NaN/Infinity (returns error)
+- Integers within ±2^53 become `int`, others become `float`
+
+### Output (GLYPH → JSON)
+
+<CodeGroup>
+```python Python
+import glyph
+
+glyph_text = "{action=search limit=10}"
+gv = glyph.parse(glyph_text)
+json_data = glyph.to_json_loose(gv)
+# {"action": "search", "limit": 10}
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+gv, _ := glyph.Parse([]byte("{action=search limit=10}"))
+jsonData, err := glyph.ToJSONLoose(gv)
+// map[string]interface{}{"action": "search", "limit": 10}
+```
+
+```typescript TypeScript
+import { parse, toJSON } from 'glyph-js';
+
+const gv = parse('{action=search limit=10}');
+const jsonData = toJSON(gv);
+// {action: 'search', limit: 10}
+```
+</CodeGroup>
+
+**Produces valid JSON:**
+- IDs become `"^prefix:value"` strings
+- Times become ISO-8601 strings
+- Bytes become base64 strings
+
+### Extended Mode
+
+With `BridgeOpts{Extended: true}`:
+- Times become `{"$glyph":"time","value":"..."}`
+- IDs become `{"$glyph":"id","value":"^..."}`
+- Bytes become `{"$glyph":"bytes","base64":"..."}`
+
+## CLI Usage
+
+```bash
+# Format JSON as canonical GLYPH-Loose
+echo '{"b":1,"a":2}' | glyph fmt-loose
+# Output: {a=2 b=1}
+
+# Convert to pretty JSON
+echo '{"b":1,"a":2}' | glyph to-json
+# Output:
+# {
+#   "a": 2,
+#   "b": 1
+# }
+
+# File input
+glyph fmt-loose data.json
+
+# LLM mode (ASCII-safe nulls)
+echo '{"value":null}' | glyph fmt-loose --llm
+# Output: {value=_}
+```
+
+## When to Use Loose Mode
+
+<AccordionGroup>
+  <Accordion title="Drop-in JSON Replacement" icon="swap">
+    When you need to reduce token usage for LLM communication without changing your data model.
+    
+    **Use case:** Serializing API responses, agent state, or tool call results.
+  </Accordion>
+  
+  <Accordion title="State Fingerprinting" icon="fingerprint">
+    When you need deterministic hashing for caching, versioning, or integrity verification.
+    
+    **Use case:** Agent checkpoints, distributed state sync, optimistic concurrency control.
+  </Accordion>
+  
+  <Accordion title="Cross-Language Interop" icon="globe">
+    When you need identical serialization across Go, Python, and JavaScript.
+    
+    **Use case:** Multi-language microservices, polyglot agent systems.
+  </Accordion>
+  
+  <Accordion title="Human-Readable Logs" icon="file-lines">
+    When you want compact, readable logs without JSON noise.
+    
+    **Use case:** Debugging, audit trails, human review of agent decisions.
+  </Accordion>
+</AccordionGroup>
+
+## Conformance Testing
+
+The test corpus at `testdata/loose_json/` contains 50 cases covering:
+- Deep nesting (10-20 levels)
+- Unicode (surrogates, CJK, emoji)
+- Edge numbers (boundaries, precision)
+- Key ordering (stability, unicode)
+- Duplicate keys
+- Reserved words
+- Control characters
+
+Golden files at `testdata/loose_json/golden/` anchor expected canonical output.
+
+Cross-implementation tests verify Go, JS, and Python produce byte-identical canonical forms.
+
+## Upgrade Path
+
+GLYPH-Loose is the foundation. When you need schema features:
+
+1. **Add a schema** → enables packed encoding, FID-based parsing
+2. **Use `@open` structs** → collect unknown fields safely
+3. **Use `map<K,V>`** → validate dynamic keys
+4. **Use patches** → efficient incremental updates
+
+The canonical form remains stable across modes.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="GS1 Streaming" href="/advanced/gs1-streaming" icon="stream">
+    Learn about frame-based streaming with integrity checks
+  </Card>
+  <Card title="Patches" href="/advanced/patches" icon="code-merge">
+    Explore incremental state updates with base verification
+  </Card>
+  <Card title="Fingerprinting" href="/advanced/fingerprinting" icon="fingerprint">
+    Understand SHA-256 state hashing for verification
+  </Card>
+  <Card title="API Reference" href="/api-reference" icon="code">
+    Explore language-specific APIs
+  </Card>
+</CardGroup>

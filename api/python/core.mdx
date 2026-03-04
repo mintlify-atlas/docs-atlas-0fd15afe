@@ -1,0 +1,729 @@
+---
+title: "Core Types"
+description: "Complete reference for GValue, GType, and type constructors"
+---
+
+## GValue
+
+The universal value container for GLYPH data. All GLYPH values are represented as `GValue` instances.
+
+### Type Property
+
+<ParamField path="type" type="GType" required>
+  The type of this value (null, bool, int, float, str, bytes, time, id, list, map, struct, sum)
+</ParamField>
+
+### Type Constructors
+
+Static methods for creating GValue instances:
+
+#### null()
+
+Create a null value.
+
+```python
+from glyph import GValue
+
+v = GValue.null()
+print(v.is_null())  # True
+```
+
+**Returns:** `GValue` - A null value
+
+#### bool_(v: bool)
+
+Create a boolean value.
+
+<ParamField path="v" type="bool" required>
+  Boolean value (True or False)
+</ParamField>
+
+```python
+v = GValue.bool_(True)
+print(v.as_bool())  # True
+```
+
+**Returns:** `GValue` - A boolean value
+
+#### int_(v: int)
+
+Create an integer value.
+
+<ParamField path="v" type="int" required>
+  Integer value
+</ParamField>
+
+```python
+v = GValue.int_(42)
+print(v.as_int())  # 42
+```
+
+**Returns:** `GValue` - An integer value
+
+#### float_(v: float)
+
+Create a floating-point value.
+
+<ParamField path="v" type="float" required>
+  Float value
+</ParamField>
+
+```python
+v = GValue.float_(3.14)
+print(v.as_float())  # 3.14
+```
+
+**Returns:** `GValue` - A float value
+
+#### str_(v: str)
+
+Create a string value.
+
+<ParamField path="v" type="str" required>
+  String value
+</ParamField>
+
+```python
+v = GValue.str_("hello world")
+print(v.as_str())  # "hello world"
+```
+
+**Returns:** `GValue` - A string value
+
+#### bytes_(v: bytes)
+
+Create a bytes value.
+
+<ParamField path="v" type="bytes" required>
+  Bytes value
+</ParamField>
+
+```python
+v = GValue.bytes_(b"\x00\x01\x02")
+print(v.as_bytes())  # b'\x00\x01\x02'
+```
+
+**Returns:** `GValue` - A bytes value
+
+#### time(v: datetime)
+
+Create a timestamp value.
+
+<ParamField path="v" type="datetime" required>
+  Python datetime object (with or without timezone)
+</ParamField>
+
+```python
+from datetime import datetime, timezone
+
+dt = datetime(2025, 1, 13, 12, 0, 0, tzinfo=timezone.utc)
+v = GValue.time(dt)
+print(v.as_time())  # 2025-01-13 12:00:00+00:00
+```
+
+**Returns:** `GValue` - A time value
+
+#### id(prefix: str, value: str)
+
+Create a reference ID value.
+
+<ParamField path="prefix" type="str" required>
+  ID prefix (can be empty string)
+</ParamField>
+
+<ParamField path="value" type="str" required>
+  ID value
+</ParamField>
+
+```python
+# With prefix
+user_id = GValue.id("user", "123")
+ref = user_id.as_id()
+print(ref.prefix)  # "user"
+print(ref.value)   # "123"
+
+# Without prefix
+simple_id = GValue.id("", "abc")
+```
+
+**Returns:** `GValue` - An ID reference value
+
+#### list_(*values: GValue)
+
+Create a list value.
+
+<ParamField path="values" type="GValue..." required>
+  Variable number of GValue elements
+</ParamField>
+
+```python
+v = GValue.list_(
+    GValue.int_(1),
+    GValue.int_(2),
+    GValue.int_(3)
+)
+print(len(v))  # 3
+```
+
+**Returns:** `GValue` - A list value
+
+#### map_(*entries: MapEntry)
+
+Create a map value.
+
+<ParamField path="entries" type="MapEntry..." required>
+  Variable number of key-value pairs
+</ParamField>
+
+```python
+from glyph import MapEntry
+
+v = GValue.map_(
+    MapEntry("name", GValue.str_("Alice")),
+    MapEntry("age", GValue.int_(30))
+)
+print(v.get("name").as_str())  # "Alice"
+```
+
+**Returns:** `GValue` - A map value
+
+#### struct(type_name: str, *fields: MapEntry)
+
+Create a struct value with a type name.
+
+<ParamField path="type_name" type="str" required>
+  Name of the struct type
+</ParamField>
+
+<ParamField path="fields" type="MapEntry..." required>
+  Variable number of field entries
+</ParamField>
+
+```python
+from glyph import MapEntry
+
+v = GValue.struct("Person",
+    MapEntry("name", GValue.str_("Alice")),
+    MapEntry("age", GValue.int_(30))
+)
+struct = v.as_struct()
+print(struct.type_name)  # "Person"
+```
+
+**Returns:** `GValue` - A struct value
+
+#### sum(tag: str, value: Optional[GValue])
+
+Create a sum type (tagged union) value.
+
+<ParamField path="tag" type="str" required>
+  Tag identifying the variant
+</ParamField>
+
+<ParamField path="value" type="GValue | None" required>
+  Optional payload value
+</ParamField>
+
+```python
+# Sum with value
+some = GValue.sum("Some", GValue.int_(42))
+sum_val = some.as_sum()
+print(sum_val.tag)    # "Some"
+print(sum_val.value.as_int())  # 42
+
+# Sum without value
+none = GValue.sum("None", None)
+```
+
+**Returns:** `GValue` - A sum type value
+
+### Value Accessors
+
+Methods for extracting typed values. All accessors raise `TypeError` if the value is not of the expected type.
+
+#### is_null() → bool
+
+Check if the value is null.
+
+```python
+v = GValue.null()
+if v.is_null():
+    print("Value is null")
+```
+
+**Returns:** `bool` - True if value is null
+
+#### as_bool() → bool
+
+Extract boolean value.
+
+```python
+v = GValue.bool_(True)
+result = v.as_bool()  # True
+```
+
+**Returns:** `bool` - The boolean value
+
+**Raises:** `TypeError` - If value is not a boolean
+
+#### as_int() → int
+
+Extract integer value.
+
+```python
+v = GValue.int_(42)
+result = v.as_int()  # 42
+```
+
+**Returns:** `int` - The integer value
+
+**Raises:** `TypeError` - If value is not an integer
+
+#### as_float() → float
+
+Extract float value.
+
+```python
+v = GValue.float_(3.14)
+result = v.as_float()  # 3.14
+```
+
+**Returns:** `float` - The float value
+
+**Raises:** `TypeError` - If value is not a float
+
+#### as_str() → str
+
+Extract string value.
+
+```python
+v = GValue.str_("hello")
+result = v.as_str()  # "hello"
+```
+
+**Returns:** `str` - The string value
+
+**Raises:** `TypeError` - If value is not a string
+
+#### as_bytes() → bytes
+
+Extract bytes value.
+
+```python
+v = GValue.bytes_(b"data")
+result = v.as_bytes()  # b"data"
+```
+
+**Returns:** `bytes` - The bytes value
+
+**Raises:** `TypeError` - If value is not bytes
+
+#### as_time() → datetime
+
+Extract datetime value.
+
+```python
+from datetime import datetime, timezone
+
+v = GValue.time(datetime.now(timezone.utc))
+result = v.as_time()  # datetime object
+```
+
+**Returns:** `datetime` - The datetime value
+
+**Raises:** `TypeError` - If value is not a time
+
+#### as_id() → RefID
+
+Extract reference ID value.
+
+```python
+v = GValue.id("user", "123")
+ref = v.as_id()
+print(ref.prefix)  # "user"
+print(ref.value)   # "123"
+```
+
+**Returns:** `RefID` - The reference ID object
+
+**Raises:** `TypeError` - If value is not an ID
+
+#### as_list() → List[GValue]
+
+Extract list value.
+
+```python
+v = GValue.list_(GValue.int_(1), GValue.int_(2))
+lst = v.as_list()
+for item in lst:
+    print(item.as_int())
+```
+
+**Returns:** `List[GValue]` - The list of values
+
+**Raises:** `TypeError` - If value is not a list
+
+#### as_map() → List[MapEntry]
+
+Extract map entries.
+
+```python
+from glyph import MapEntry
+
+v = GValue.map_(MapEntry("a", GValue.int_(1)))
+entries = v.as_map()
+for entry in entries:
+    print(f"{entry.key} = {entry.value.as_int()}")
+```
+
+**Returns:** `List[MapEntry]` - The map entries
+
+**Raises:** `TypeError` - If value is not a map
+
+#### as_struct() → StructValue
+
+Extract struct value.
+
+```python
+v = GValue.struct("Person", MapEntry("name", GValue.str_("Alice")))
+struct = v.as_struct()
+print(struct.type_name)  # "Person"
+for field in struct.fields:
+    print(f"{field.key}: {field.value}")
+```
+
+**Returns:** `StructValue` - The struct object with type_name and fields
+
+**Raises:** `TypeError` - If value is not a struct
+
+#### as_sum() → SumValue
+
+Extract sum type value.
+
+```python
+v = GValue.sum("Some", GValue.int_(42))
+sum_val = v.as_sum()
+print(sum_val.tag)     # "Some"
+print(sum_val.value)   # GValue.int_(42)
+```
+
+**Returns:** `SumValue` - The sum object with tag and value
+
+**Raises:** `TypeError` - If value is not a sum type
+
+#### as_number() → int | float
+
+Extract numeric value (works for both int and float).
+
+```python
+v1 = GValue.int_(42)
+v2 = GValue.float_(3.14)
+
+print(v1.as_number())  # 42
+print(v2.as_number())  # 3.14
+```
+
+**Returns:** `int | float` - The numeric value
+
+**Raises:** `TypeError` - If value is not numeric
+
+### Collection Methods
+
+#### get(key: str) → Optional[GValue]
+
+Get field from struct or map by key.
+
+<ParamField path="key" type="str" required>
+  Field or entry key
+</ParamField>
+
+```python
+v = GValue.map_(MapEntry("name", GValue.str_("Alice")))
+name = v.get("name")
+if name:
+    print(name.as_str())  # "Alice"
+```
+
+**Returns:** `GValue | None` - The value if found, None otherwise
+
+#### index(i: int) → GValue
+
+Get element from list by index.
+
+<ParamField path="i" type="int" required>
+  Zero-based index
+</ParamField>
+
+```python
+v = GValue.list_(GValue.int_(1), GValue.int_(2), GValue.int_(3))
+print(v.index(0).as_int())  # 1
+print(v.index(2).as_int())  # 3
+```
+
+**Returns:** `GValue` - The element at the index
+
+**Raises:** `IndexError` - If index is out of bounds
+
+#### __len__() → int
+
+Get length of list, map, or struct fields.
+
+```python
+v = GValue.list_(GValue.int_(1), GValue.int_(2))
+print(len(v))  # 2
+
+v2 = GValue.map_(MapEntry("a", GValue.int_(1)))
+print(len(v2))  # 1
+```
+
+**Returns:** `int` - Number of elements/fields
+
+### Mutators
+
+#### set(key: str, value: GValue)
+
+Set field on struct or map.
+
+<ParamField path="key" type="str" required>
+  Field or entry key
+</ParamField>
+
+<ParamField path="value" type="GValue" required>
+  Value to set
+</ParamField>
+
+```python
+v = GValue.map_()
+v.set("name", GValue.str_("Alice"))
+v.set("age", GValue.int_(30))
+```
+
+**Raises:** `TypeError` - If value is not a struct or map
+
+#### append(value: GValue)
+
+Append to list.
+
+<ParamField path="value" type="GValue" required>
+  Value to append
+</ParamField>
+
+```python
+v = GValue.list_()
+v.append(GValue.int_(1))
+v.append(GValue.int_(2))
+print(len(v))  # 2
+```
+
+**Raises:** `TypeError` - If value is not a list
+
+#### clone() → GValue
+
+Create a deep copy of this value.
+
+```python
+original = GValue.list_(GValue.int_(1), GValue.int_(2))
+copy = original.clone()
+copy.append(GValue.int_(3))
+
+print(len(original))  # 2
+print(len(copy))      # 3
+```
+
+**Returns:** `GValue` - A deep copy of the value
+
+## GType
+
+Enumeration of GLYPH value types.
+
+```python
+from glyph import GType
+
+v = GValue.int_(42)
+if v.type == GType.INT:
+    print("It's an integer")
+```
+
+### Values
+
+- `GType.NULL` - Null value
+- `GType.BOOL` - Boolean (true/false)
+- `GType.INT` - Integer number
+- `GType.FLOAT` - Floating-point number
+- `GType.STR` - String
+- `GType.BYTES` - Byte array
+- `GType.TIME` - Timestamp
+- `GType.ID` - Reference ID
+- `GType.LIST` - List of values
+- `GType.MAP` - Key-value map
+- `GType.STRUCT` - Typed struct
+- `GType.SUM` - Tagged union
+
+## Helper Classes
+
+### MapEntry
+
+Key-value pair for maps and structs.
+
+<ParamField path="key" type="str" required>
+  The entry key
+</ParamField>
+
+<ParamField path="value" type="GValue" required>
+  The entry value
+</ParamField>
+
+```python
+from glyph import MapEntry, GValue
+
+entry = MapEntry("name", GValue.str_("Alice"))
+print(entry.key)    # "name"
+print(entry.value)  # GValue.str_("Alice")
+```
+
+### RefID
+
+Reference ID with optional prefix.
+
+<ParamField path="prefix" type="str" required>
+  ID prefix (can be empty)
+</ParamField>
+
+<ParamField path="value" type="str" required>
+  ID value
+</ParamField>
+
+```python
+from glyph import RefID
+
+ref = RefID("user", "123")
+print(ref.prefix)  # "user"
+print(ref.value)   # "123"
+print(str(ref))    # "^user:123"
+```
+
+### StructValue
+
+Struct with type name and fields.
+
+<ParamField path="type_name" type="str" required>
+  Name of the struct type
+</ParamField>
+
+<ParamField path="fields" type="List[MapEntry]" required>
+  List of field entries
+</ParamField>
+
+### SumValue
+
+Tagged union (sum type).
+
+<ParamField path="tag" type="str" required>
+  Tag identifying the variant
+</ParamField>
+
+<ParamField path="value" type="GValue | None" required>
+  Optional payload value
+</ParamField>
+
+## Shorthand Constructor: g
+
+The `g` object provides shorthand constructors without the trailing underscore.
+
+```python
+from glyph import g, field
+
+# Instead of GValue.str_("hello")
+v = g.str("hello")
+
+# Build complex structures
+person = g.struct("Person",
+    field("name", g.str("Alice")),
+    field("age", g.int(30)),
+    field("scores", g.list(g.int(95), g.int(87), g.int(92)))
+)
+```
+
+### Available Methods
+
+- `g.null()` → GValue
+- `g.bool(v: bool)` → GValue
+- `g.int(v: int)` → GValue
+- `g.float(v: float)` → GValue
+- `g.str(v: str)` → GValue
+- `g.bytes(v: bytes)` → GValue
+- `g.time(v: datetime)` → GValue
+- `g.id(prefix: str, value: str)` → GValue
+- `g.list(*values: GValue)` → GValue
+- `g.map(*entries: MapEntry)` → GValue
+- `g.struct(type_name: str, *fields: MapEntry)` → GValue
+- `g.sum(tag: str, value: Optional[GValue])` → GValue
+
+## field() Helper
+
+Create a field entry for struct construction.
+
+<ParamField path="key" type="str" required>
+  Field name
+</ParamField>
+
+<ParamField path="value" type="GValue" required>
+  Field value
+</ParamField>
+
+```python
+from glyph import field, g
+
+# Create fields
+name_field = field("name", g.str("Alice"))
+age_field = field("age", g.int(30))
+
+# Use in structs
+person = g.struct("Person", name_field, age_field)
+```
+
+**Returns:** `MapEntry` - A field entry
+
+## Examples
+
+### Building Complex Structures
+
+```python
+from glyph import g, field
+import glyph
+
+# Create a match result
+match = g.struct("Match",
+    field("home", g.str("Arsenal")),
+    field("away", g.str("Liverpool")),
+    field("score", g.list(g.int(2), g.int(1))),
+    field("date", g.str("2025-03-15")),
+    field("venue", g.struct("Venue",
+        field("name", g.str("Emirates Stadium")),
+        field("capacity", g.int(60704))
+    ))
+)
+
+# Emit to GLYPH format
+text = glyph.emit(match)
+print(text)
+```
+
+### Type Checking Pattern
+
+```python
+from glyph import GType
+
+def process_value(v):
+    """Process different value types."""
+    if v.type == GType.NULL:
+        return None
+    elif v.type == GType.INT:
+        return v.as_int() * 2
+    elif v.type == GType.STR:
+        return v.as_str().upper()
+    elif v.type == GType.LIST:
+        return [process_value(item) for item in v.as_list()]
+    else:
+        return v
+```

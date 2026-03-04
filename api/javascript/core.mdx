@@ -1,0 +1,441 @@
+---
+title: Core Types
+description: GValue, Schema, and type constructors
+---
+
+# Core Types
+
+The GLYPH JavaScript SDK provides strongly-typed value containers and schema definitions for type-safe serialization.
+
+## GValue
+
+The universal value container for all GLYPH data. Every value in GLYPH is represented as a `GValue` instance.
+
+### Type System
+
+GLYPH supports 12 core types:
+
+```typescript types.ts:7
+export type GType = 
+  | 'null'    // Null value
+  | 'bool'    // Boolean
+  | 'int'     // Integer
+  | 'float'   // Floating point
+  | 'str'     // String
+  | 'bytes'   // Binary data
+  | 'time'    // Timestamp
+  | 'id'      // Reference ID (^prefix:value)
+  | 'list'    // List of values
+  | 'map'     // Key-value map
+  | 'struct'  // Typed struct
+  | 'sum';    // Tagged union
+```
+
+### Value Constructors
+
+Create GValue instances using static constructors:
+
+```typescript
+import { GValue } from 'cowrie-glyph';
+
+// Scalar values
+const nullVal = GValue.null();
+const boolVal = GValue.bool(true);
+const intVal = GValue.int(42);
+const floatVal = GValue.float(3.14);
+const strVal = GValue.str('hello');
+const bytesVal = GValue.bytes(new Uint8Array([1, 2, 3]));
+const timeVal = GValue.time(new Date());
+const idVal = GValue.id('user', '123'); // ^user:123
+
+// Container values
+const listVal = GValue.list(
+  GValue.int(1),
+  GValue.int(2),
+  GValue.int(3)
+);
+
+const mapVal = GValue.map(
+  { key: 'name', value: GValue.str('Alice') },
+  { key: 'age', value: GValue.int(30) }
+);
+
+const structVal = GValue.struct('User',
+  { key: 'id', value: GValue.id('u', '123') },
+  { key: 'name', value: GValue.str('Alice') }
+);
+
+const sumVal = GValue.sum('Ok', GValue.str('success'));
+```
+
+### Shorthand Constructors
+
+Use the `g` object for concise value creation:
+
+```typescript
+import { g, field } from 'cowrie-glyph';
+
+// More concise syntax
+const team = g.struct('Team',
+  field('id', g.id('t', 'ARS')),
+  field('name', g.str('Arsenal')),
+  field('founded', g.int(1886)),
+  field('active', g.bool(true)),
+  field('lastMatch', g.time(new Date()))
+);
+
+const players = g.list(
+  g.str('Saka'),
+  g.str('Odegaard'),
+  g.str('Rice')
+);
+```
+
+### Value Accessors
+
+Extract typed values from GValue instances:
+
+```typescript
+// Type checks
+if (value.isNull()) {
+  console.log('Value is null');
+}
+
+// Typed accessors (throw if type mismatch)
+const b: boolean = value.asBool();
+const n: number = value.asInt();
+const f: number = value.asFloat();
+const s: string = value.asStr();
+const bytes: Uint8Array = value.asBytes();
+const date: Date = value.asTime();
+const ref: RefID = value.asId();
+const items: GValue[] = value.asList();
+const entries: MapEntry[] = value.asMap();
+const struct: StructValue = value.asStruct();
+const sum: SumValue = value.asSum();
+
+// Generic number accessor
+const num: number = value.asNumber(); // works for int or float
+```
+
+### Field Access
+
+Access struct and map fields:
+
+```typescript
+// Get field by key
+const name = team.get('name')?.asStr();
+const id = team.get('id')?.asId();
+
+// Get list element by index
+const first = players.index(0).asStr();
+
+// Get length
+const fieldCount = team.len(); // number of fields
+const itemCount = players.len(); // number of items
+```
+
+### Value Mutation
+
+Modify GValue instances in place:
+
+```typescript
+// Set field on struct or map
+team.set('name', g.str('Arsenal FC'));
+team.set('stadium', g.str('Emirates'));
+
+// Append to list
+players.append(g.str('Martinelli'));
+```
+
+### Deep Copy
+
+Clone GValue instances:
+
+```typescript
+const copy = team.clone();
+// Creates a deep copy with all nested values cloned
+```
+
+## Schema
+
+Defines types, fields, and encoding rules for type-safe serialization.
+
+### SchemaBuilder
+
+Create schemas using the fluent builder API:
+
+```typescript
+import { SchemaBuilder, t } from 'cowrie-glyph';
+
+const schema = new SchemaBuilder()
+  .addPackedStruct('Team', 'v2')
+    .field('id', t.id(), { fid: 1, wireKey: 't' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+    .field('league', t.str(), { fid: 3, wireKey: 'l' })
+    .field('founded', t.int(), { fid: 4, wireKey: 'f', optional: true })
+  .addStruct('Player', 'v1')
+    .field('id', t.id(), { fid: 1 })
+    .field('name', t.str(), { fid: 2 })
+    .field('team', t.ref('Team'), { fid: 3 })
+  .build();
+```
+
+### Type Specifications
+
+Define field types using the `t` helper:
+
+```typescript
+import { t, TypeSpec } from 'cowrie-glyph';
+
+// Scalar types
+t.null()    // Null
+t.bool()    // Boolean
+t.int()     // Integer
+t.float()   // Float
+t.str()     // String
+t.bytes()   // Binary data
+t.time()    // Timestamp
+t.id()      // Reference ID
+
+// Container types
+t.list(t.str())              // list<str>
+t.map(t.str(), t.int())      // map<str, int>
+t.ref('TypeName')            // reference to named type
+
+// Complex examples
+t.list(t.ref('Player'))      // list of Players
+t.map(t.str(), t.ref('Team')) // map with Team values
+```
+
+### Field Definitions
+
+Define struct fields with options:
+
+<ParamField path="name" type="string" required>
+  Field name (used in JSON and struct mode)
+</ParamField>
+
+<ParamField path="type" type="TypeSpec" required>
+  Field type specification
+</ParamField>
+
+<ParamField path="fid" type="number" required>
+  Stable field ID for packed encoding (must be unique within type)
+</ParamField>
+
+<ParamField path="wireKey" type="string">
+  Short key for wire format (1-2 chars recommended)
+</ParamField>
+
+<ParamField path="optional" type="boolean" default="false">
+  Whether field is optional (can be omitted or null)
+</ParamField>
+
+<ParamField path="keepNull" type="boolean" default="false">
+  Emit null even if optional (prevents sparse bitmap compression)
+</ParamField>
+
+<ParamField path="codec" type="string">
+  Encoding hint (e.g., 'base64' for bytes)
+</ParamField>
+
+<ParamField path="defaultValue" type="GValue">
+  Default value when field is omitted
+</ParamField>
+
+### Struct Types
+
+Define struct types with different encoding modes:
+
+```typescript
+// Packed struct (positional encoding with bitmap)
+const schema1 = new SchemaBuilder()
+  .addPackedStruct('Match', 'v1')
+    .field('id', t.id(), { fid: 1, wireKey: 'i' })
+    .field('kickoff', t.time(), { fid: 2, wireKey: 'k' })
+    .field('homeScore', t.int(), { fid: 3, wireKey: 'h', optional: true })
+    .field('awayScore', t.int(), { fid: 4, wireKey: 'a', optional: true })
+  .build();
+
+// Regular struct (named fields)
+const schema2 = new SchemaBuilder()
+  .addStruct('User', 'v1')
+    .field('id', t.id(), { fid: 1 })
+    .field('name', t.str(), { fid: 2 })
+  .build();
+
+// Open struct (accepts unknown fields)
+const schema3 = new SchemaBuilder()
+  .addOpenStruct('Metadata', 'v1')
+    .field('created', t.time(), { fid: 1 })
+    // Can include additional fields not in schema
+  .build();
+```
+
+### Sum Types
+
+Define tagged unions:
+
+```typescript
+const schema = new SchemaBuilder()
+  .addSum('Result', 'v1')
+    .variant('Ok', t.str())
+    .variant('Err', t.str())
+  .addSum('Option', 'v1')
+    .variant('Some', t.int())
+    .variant('None', t.null())
+  .build();
+
+// Create sum values
+const success = g.sum('Ok', g.str('Operation completed'));
+const failure = g.sum('Err', g.str('File not found'));
+const some = g.sum('Some', g.int(42));
+const none = g.sum('None', null);
+```
+
+### Schema Queries
+
+Query schema information:
+
+```typescript
+// Get type definition
+const typeDef = schema.getType('Team');
+if (typeDef) {
+  console.log(typeDef.kind); // 'struct' or 'sum'
+  console.log(typeDef.version); // 'v2'
+}
+
+// Get field definition
+const fieldDef = schema.getField('Team', 'name');
+if (fieldDef) {
+  console.log(fieldDef.fid); // 2
+  console.log(fieldDef.wireKey); // 'n'
+}
+
+// Get fields sorted by FID
+const allFields = schema.fieldsByFid('Team');
+const requiredFields = schema.requiredFieldsByFid('Team');
+const optionalFields = schema.optionalFieldsByFid('Team');
+```
+
+### Schema Hash
+
+Compute stable schema hash for versioning:
+
+```typescript
+const hash = schema.computeHash();
+console.log(hash); // "a3f5b2c1"
+
+// Hash is stable - same schema always produces same hash
+const canonical = schema.canonical();
+console.log(canonical);
+// @schema{
+//   Team:v2 struct{
+//     id: id @k(t)
+//     name: str @k(n)
+//     league: str @k(l)
+//   }
+// }
+```
+
+## Helper Types
+
+### RefID
+
+Reference IDs are typed identifiers with optional prefix:
+
+```typescript
+import { RefID } from 'cowrie-glyph';
+
+const ref: RefID = {
+  prefix: 'user',  // Optional prefix
+  value: '123'     // ID value
+};
+
+// Serializes as: ^user:123
+```
+
+### MapEntry
+
+Map and struct fields are represented as entries:
+
+```typescript
+import { MapEntry, field } from 'cowrie-glyph';
+
+const entry: MapEntry = {
+  key: 'name',
+  value: g.str('Alice')
+};
+
+// Helper function for struct construction
+const entry2 = field('age', g.int(30));
+```
+
+### StructValue
+
+Struct internal representation:
+
+```typescript
+import { StructValue } from 'cowrie-glyph';
+
+const struct = value.asStruct();
+const structVal: StructValue = {
+  typeName: 'Team',
+  fields: [
+    { key: 'id', value: g.id('t', 'ARS') },
+    { key: 'name', value: g.str('Arsenal') }
+  ]
+};
+```
+
+### SumValue
+
+Sum type internal representation:
+
+```typescript
+import { SumValue } from 'cowrie-glyph';
+
+const sum = value.asSum();
+const sumVal: SumValue = {
+  tag: 'Ok',
+  value: g.str('success')
+};
+```
+
+## JSON Conversion
+
+Convert between GValue and JSON:
+
+```typescript
+import { fromJson, toJson } from 'cowrie-glyph';
+
+// JSON to GValue
+const json = {
+  $type: 'Team',
+  id: '^t:ARS',
+  name: 'Arsenal',
+  founded: 1886
+};
+const value = fromJson(json, { schema, typeName: 'Team' });
+
+// GValue to JSON
+const backToJson = toJson(value, {
+  includeTypeMarkers: true,  // Add $type field
+  compactRefs: true,          // Use ^prefix:value format
+  useWireKeys: false          // Use full field names
+});
+```
+
+See [overview](/api/javascript/overview#quick-start) for complete examples.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Parsing" icon="code" href="/api/javascript/parsing">
+    Parse GLYPH format strings
+  </Card>
+  <Card title="Streaming" icon="stream" href="/api/javascript/streaming">
+    Incremental validation and GS1 transport
+  </Card>
+</CardGroup>

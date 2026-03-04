@@ -1,0 +1,217 @@
+---
+title: "Python SDK Overview"
+description: "Complete guide to the GLYPH Python SDK for token-efficient serialization"
+---
+
+## Overview
+
+The GLYPH Python SDK provides a token-efficient serialization format that is 30-50% more compact than JSON, specifically designed for AI agents and LLM applications.
+
+## Installation
+
+Install the GLYPH Python package:
+
+```bash
+pip install glyph-python
+```
+
+For development installations:
+
+```bash
+git clone https://github.com/your-org/glyph
+cd glyph/py
+pip install -e .
+```
+
+## Quick Start
+
+### Convert JSON to GLYPH
+
+```python
+import glyph
+
+# Convert JSON/dict to GLYPH format
+data = {"action": "search", "query": "weather in NYC", "max_results": 10}
+text = glyph.json_to_glyph(data)
+print(text)
+# Output: {action=search max_results=10 query="weather in NYC"}
+```
+
+### Parse GLYPH Text
+
+```python
+import glyph
+
+# Parse GLYPH text into a GValue
+v = glyph.parse('{action=search query="test"}')
+print(v.get("action").as_str())
+# Output: search
+```
+
+### Build Values Programmatically
+
+```python
+from glyph import g, field
+
+# Create structured data
+team = g.struct("Team",
+    field("name", g.str("Arsenal")),
+    field("rank", g.int(1))
+)
+
+print(glyph.emit(team))
+# Output: Team{name=Arsenal rank=1}
+```
+
+## Module Structure
+
+The GLYPH Python SDK is organized into several modules:
+
+### Core Types (`glyph.types`)
+
+- **GValue**: Universal value container for all GLYPH data types
+- **GType**: Enumeration of supported types (null, bool, int, float, str, bytes, time, id, list, map, struct, sum)
+- **g**: Shorthand constructor class for creating GValues
+- **field()**: Helper function for creating struct fields
+
+### Parsing (`glyph.parse`)
+
+- **parse()**: Parse GLYPH text into GValue objects
+- **parse_loose()**: Alias for parse() with loose parsing rules
+
+### Serialization (`glyph.loose`)
+
+- **emit()**: Convert GValue to canonical GLYPH text
+- **canonicalize_loose()**: Full canonicalization with options
+- **fingerprint_loose()**: Generate SHA-256 fingerprint of values
+- **equal_loose()**: Compare values for equality
+
+### JSON Bridge (`glyph.loose`)
+
+- **json_to_glyph()**: Convert JSON/Python data directly to GLYPH
+- **glyph_to_json()**: Parse GLYPH text to Python/JSON
+- **from_json()**: Convert Python values to GValue
+- **to_json()**: Convert GValue to Python values
+
+## Common Patterns
+
+### Working with Maps
+
+```python
+from glyph import g, field
+
+# Create a map
+config = g.map(
+    field("timeout", g.int(30)),
+    field("retry", g.bool(True)),
+    field("endpoint", g.str("https://api.example.com"))
+)
+
+# Access values
+timeout = config.get("timeout").as_int()  # 30
+```
+
+### Working with Lists
+
+```python
+from glyph import g
+
+# Create a list
+scores = g.list(g.int(95), g.int(87), g.int(92))
+
+# Iterate over elements
+for score in scores.as_list():
+    print(score.as_int())
+```
+
+### Working with Structs
+
+```python
+from glyph import g, field
+
+# Create a typed struct
+person = g.struct("Person",
+    field("name", g.str("Alice")),
+    field("age", g.int(30)),
+    field("active", g.bool(True))
+)
+
+# Access struct fields
+name = person.get("name").as_str()  # "Alice"
+struct_info = person.as_struct()
+type_name = struct_info.type_name  # "Person"
+```
+
+### Handling Nulls
+
+```python
+from glyph import g
+
+# Create null value
+value = g.null()
+
+# Check for null
+if value.is_null():
+    print("Value is null")
+```
+
+## Error Handling
+
+The SDK raises `TypeError` when accessing values with the wrong type:
+
+```python
+import glyph
+
+v = glyph.parse("42")
+
+try:
+    # This will raise TypeError
+    s = v.as_str()
+except TypeError as e:
+    print(f"Error: {e}")  # "not a str"
+    
+# Correct usage
+n = v.as_int()  # 42
+```
+
+Parsing errors raise `ValueError`:
+
+```python
+try:
+    v = glyph.parse("{invalid syntax")
+except ValueError as e:
+    print(f"Parse error: {e}")
+```
+
+## Type Safety
+
+GLYPH provides runtime type checking:
+
+```python
+from glyph import GType
+
+v = glyph.parse("42")
+
+# Check type before accessing
+if v.type == GType.INT:
+    num = v.as_int()
+elif v.type == GType.STR:
+    text = v.as_str()
+```
+
+## Performance Tips
+
+1. **Reuse parsers**: For bulk parsing, consider batching operations
+2. **Use bare strings**: Identifiers without special characters don't need quotes
+3. **Tabular mode**: Lists of homogeneous maps automatically use compact tabular format
+4. **Fingerprinting**: Use `fingerprint_loose()` for efficient deduplication
+
+## Next Steps
+
+- [Core Types](/api/python/core) - Detailed GValue and type system reference
+- [Parsing](/api/python/parsing) - Complete parsing API documentation
+- [JSON Bridge](/api/python/json-bridge) - JSON conversion and interop
+
+## Version
+
+Current version: 1.0.0

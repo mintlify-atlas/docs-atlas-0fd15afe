@@ -1,0 +1,402 @@
+---
+title: Parsing
+description: Parse GLYPH format strings back to GValue
+---
+
+# Parsing
+
+The GLYPH JavaScript SDK provides parsers to convert GLYPH format strings back to `GValue` objects.
+
+## Packed Parser
+
+Parse packed format (positional encoding) back to GValue:
+
+```typescript
+import { parsePacked, Schema } from 'cowrie-glyph';
+
+const schema = /* your schema */;
+
+// Parse dense format
+const value1 = parsePacked('Team@(^t:ARS Arsenal EPL)', schema);
+
+// Parse with bitmap (sparse optionals)
+const value2 = parsePacked(
+  'Match@{bm=0b101}(^m:123 2025-12-19T20:00:00Z 2 1)',
+  schema
+);
+
+// Access parsed values
+console.log(value1.get('name')?.asStr()); // "Arsenal"
+console.log(value2.get('homeScore')?.asInt()); // 2
+```
+
+### Packed Format Syntax
+
+The packed format uses positional encoding:
+
+```
+TypeName@(value1 value2 value3)
+```
+
+With optional bitmap for sparse fields:
+
+```
+TypeName@{bm=0b101}(required1 required2 optional1 optional3)
+```
+
+**Bitmap encoding:**
+- `0b` prefix indicates binary
+- Bits are ordered LSB-first (right to left)
+- Each bit corresponds to an optional field
+- `1` = field is present, `0` = field is null
+
+### Nested Structs
+
+Packed format supports nested structures:
+
+```typescript
+const nested = parsePacked(
+  'Match@(^m:123 Team@(^t:ARS Arsenal EPL) Team@(^t:LIV Liverpool EPL) 2 1)',
+  schema
+);
+
+const homeTeam = nested.get('home')?.asStruct();
+const homeName = homeTeam?.fields.find(f => f.key === 'name')?.value.asStr();
+```
+
+## Tabular Parser
+
+Parse tabular format (optimized for lists) back to GValue:
+
+```typescript
+import { parseTabular, TabularParseResult } from 'cowrie-glyph';
+
+const input = `
+@tab Team [t n l]
+^t:ARS Arsenal EPL
+^t:LIV Liverpool EPL
+^t:MCI "Man City" EPL
+@end
+`;
+
+const result: TabularParseResult = parseTabular(input, schema);
+
+console.log(result.typeName); // "Team"
+console.log(result.columns);  // ["t", "n", "l"]
+console.log(result.rows.length); // 3
+
+// Access row data
+for (const row of result.rows) {
+  const name = row.get('name')?.asStr();
+  const league = row.get('league')?.asStr();
+  console.log(`${name} - ${league}`);
+}
+```
+
+### Tabular Format Syntax
+
+Tabular format is optimized for lists of structs:
+
+```
+@tab TypeName [col1 col2 col3]
+value1 value2 value3
+value4 value5 value6
+@end
+```
+
+**Column identifiers:**
+- Field name: `name`
+- Wire key: `n` (if defined in schema)
+- Field ID: `#2`
+
+### Cell Formats
+
+Tabular cells support all GLYPH value types:
+
+```typescript
+const input = `
+@tab Event [id time score active]
+^e:1 2025-12-19T20:00:00Z 2 t
+^e:2 2025-12-20T15:00:00Z ∅ f
+^e:3 2025-12-21T18:30:00Z 1 t
+@end
+`;
+
+const result = parseTabular(input, schema);
+```
+
+**Supported formats:**
+- Null: `∅`, `null`, `nil`, `none`
+- Boolean: `t`/`true`, `f`/`false`
+- Integer: `42`, `-17`
+- Float: `3.14`, `1.5e-3`
+- String: bare tokens or `"quoted strings"`
+- Ref: `^prefix:value`
+- Time: ISO 8601 format
+- List: `[item1 item2 item3]`
+- Map: `{key1=val1 key2=val2}`
+- Nested packed: `Team@(^t:ARS Arsenal EPL)`
+
+### Escaped Strings
+
+Quoted strings support standard escape sequences:
+
+```typescript
+const input = `
+@tab Message [id text]
+^m:1 "Hello\nWorld"
+^m:2 "Quote: \"test\""
+^m:3 "Tab:\tseparated"
+@end
+`;
+
+const result = parseTabular(input, schema);
+const text = result.rows[0].get('text')?.asStr();
+// "Hello\nWorld" (actual newline)
+```
+
+## Header Parser
+
+Parse GLYPH metadata headers:
+
+```typescript
+import { parseHeader, Header } from 'cowrie-glyph';
+
+// Parse header line
+const header1 = parseHeader('@lyph v2.6 @schema#a3f5b2c1 @mode=packed');
+
+if (header1) {
+  console.log(header1.version);   // "v2.6"
+  console.log(header1.schemaId);  // "a3f5b2c1"
+  console.log(header1.mode);      // "packed"
+}
+
+// Parse with additional metadata
+const header2 = parseHeader(
+  '@glyph v2.6 @schema#abc123 @mode=tabular @keys=wire @target=^doc:main'
+);
+
+if (header2) {
+  console.log(header2.keyMode);   // "wire"
+  console.log(header2.target);    // { prefix: "doc", value: "main" }
+}
+```
+
+### Header Fields
+
+<ResponseField name="version" type="string" required>
+  GLYPH version (e.g., "v2.6")
+</ResponseField>
+
+<ResponseField name="schemaId" type="string">
+  Schema hash for version validation
+</ResponseField>
+
+<ResponseField name="mode" type="'auto' | 'struct' | 'packed' | 'tabular' | 'patch'">
+  Encoding mode hint
+</ResponseField>
+
+<ResponseField name="keyMode" type="'wire' | 'name' | 'fid'">
+  Field key encoding mode
+</ResponseField>
+
+<ResponseField name="target" type="RefID">
+  Target document reference (for patches)
+</ResponseField>
+
+## Parse Options
+
+Configure parser behavior:
+
+```typescript
+import { ParseOptions } from 'cowrie-glyph';
+
+const options: ParseOptions = {
+  schema: schema,      // Schema for type validation
+  tolerant: false      // Strict parsing (throw on errors)
+};
+
+const value = parsePacked(input, schema);
+```
+
+<ParamField path="schema" type="Schema">
+  Schema for type hints and validation (required for most operations)
+</ParamField>
+
+<ParamField path="tolerant" type="boolean" default="false">
+  Enable tolerant mode (continue parsing on recoverable errors)
+</ParamField>
+
+## Error Handling
+
+Parsers throw descriptive errors on invalid input:
+
+```typescript
+try {
+  const value = parsePacked('InvalidFormat', schema);
+} catch (error) {
+  console.error(error.message);
+  // "unknown type: InvalidFormat" (at pos 13)
+}
+
+try {
+  const result = parseTabular(badInput, schema);
+} catch (error) {
+  console.error(error.message);
+  // "row has 2 values, expected 3"
+}
+```
+
+**Common parse errors:**
+- Unknown type name
+- Type mismatch
+- Invalid syntax
+- Unexpected end of input
+- Row length mismatch (tabular)
+- Unknown column name (tabular)
+- Unterminated string
+- Invalid number format
+
+## Value Types
+
+### Scalar Parsing
+
+The parser automatically detects value types:
+
+```typescript
+// Null
+∅
+
+// Boolean
+t, f, true, false
+
+// Integer
+0, 42, -17
+
+// Float
+3.14, -0.5, 1.5e-3, 2e10
+
+// String (bare)
+Hello, simple_token, path/to/file
+
+// String (quoted)
+"Hello World", "Quote: \"test\""
+
+// Ref
+^user:123, ^t:ARS, ^"complex:ref:with:colons"
+
+// Time
+2025-12-19T20:00:00Z, 2025-01-15T14:30:00.123Z
+```
+
+### Container Parsing
+
+Parse nested containers:
+
+```typescript
+// List
+[1 2 3]
+[^t:ARS ^t:LIV ^t:MCI]
+["Alice" "Bob" "Charlie"]
+
+// Map
+{name=Arsenal league=EPL}
+{id=^t:ARS founded=1886}
+
+// Struct (v1 format)
+Team{id=^t:ARS name=Arsenal league=EPL}
+
+// Packed struct
+Team@(^t:ARS Arsenal EPL)
+
+// Sum
+Result:Ok("success")
+Option:Some(42)
+```
+
+## Complete Example
+
+Parse a complete GLYPH document with header:
+
+```typescript
+import { 
+  parseHeader, 
+  parseTabular, 
+  Schema,
+  SchemaBuilder,
+  t 
+} from 'cowrie-glyph';
+
+// Define schema
+const schema = new SchemaBuilder()
+  .addPackedStruct('Player', 'v1')
+    .field('id', t.id(), { fid: 1, wireKey: 'i' })
+    .field('name', t.str(), { fid: 2, wireKey: 'n' })
+    .field('team', t.str(), { fid: 3, wireKey: 't' })
+    .field('goals', t.int(), { fid: 4, wireKey: 'g' })
+  .build();
+
+// Parse document
+const document = `
+@lyph v2.6 @schema#${schema.hash} @mode=tabular
+
+@tab Player [i n t g]
+^p:1 "Bukayo Saka" Arsenal 14
+^p:2 "Mohamed Salah" Liverpool 18
+^p:3 "Erling Haaland" "Man City" 27
+@end
+`;
+
+const lines = document.trim().split('\n');
+
+// Parse header
+const header = parseHeader(lines[0]);
+if (header?.schemaId !== schema.hash) {
+  throw new Error('Schema mismatch');
+}
+
+// Parse tabular data
+const tableStart = lines.findIndex(l => l.startsWith('@tab'));
+const tableLines = lines.slice(tableStart).join('\n');
+const result = parseTabular(tableLines, schema);
+
+console.log(`Parsed ${result.rows.length} players`);
+
+for (const player of result.rows) {
+  const name = player.get('name')?.asStr();
+  const team = player.get('team')?.asStr();
+  const goals = player.get('goals')?.asInt();
+  console.log(`${name} (${team}): ${goals} goals`);
+}
+```
+
+## Performance
+
+The parser is optimized for streaming and handles large datasets efficiently:
+
+- **Single-pass parsing**: No backtracking
+- **Zero-copy strings**: Direct string slices where possible
+- **Lazy evaluation**: Values parsed on demand
+- **Incremental tabular**: Process rows as they arrive
+
+```typescript
+// Parse large tabular dataset
+const largeInput = generateLargeTabular(10000); // 10k rows
+const start = performance.now();
+const result = parseTabular(largeInput, schema);
+const elapsed = performance.now() - start;
+
+console.log(`Parsed ${result.rows.length} rows in ${elapsed.toFixed(2)}ms`);
+// Typical: ~5-10ms for 10k rows
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Types" icon="cube" href="/api/javascript/core">
+    Learn about GValue and Schema
+  </Card>
+  <Card title="Streaming" icon="stream" href="/api/javascript/streaming">
+    Incremental validation for real-time parsing
+  </Card>
+</CardGroup>

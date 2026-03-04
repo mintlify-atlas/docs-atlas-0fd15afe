@@ -1,0 +1,693 @@
+---
+title: 'Streaming Validation'
+description: 'Validate LLM output as tokens stream, cancel immediately on error'
+icon: 'bolt'
+---
+
+<Info>**Don't wait for full generation. Catch errors mid-stream, cancel immediately, save tokens.**</Info>
+
+GLYPH's streaming validator detects errors as tokens arrive from an LLM, enabling immediate cancellation. This saves tokens, reduces latency, and improves reliability.
+
+## The Problem
+
+### Traditional Validation Flow
+
+<Steps>
+  <Step title="Wait for completion">
+    LLM generates full response (50-150 tokens, 2-5 seconds)
+  </Step>
+  <Step title="Parse complete output">
+    Parse JSON/GLYPH after generation completes
+  </Step>
+  <Step title="Validate against schema">
+    Check tool exists, types match, constraints satisfied
+  </Step>
+  <Step title="Discover error">
+    Tool doesn't exist OR params invalid
+  </Step>
+  <Step title="Waste">
+    **All tokens, all latency wasted**
+  </Step>
+</Steps>
+
+<Warning>
+With traditional validation, you pay for **every token** of an invalid response.
+</Warning>
+
+### Streaming Validation Flow
+
+<Steps>
+  <Step title="Stream begins">
+    Tokens arrive: `{`, `tool`, `=`, `unknown`, ...
+  </Step>
+  <Step title="Early detection">
+    Error detected as soon as `unknown` appears (token ~5)
+  </Step>
+  <Step title="Immediate cancel">
+    Cancel generation immediately, stop wasting tokens
+  </Step>
+  <Step title="Savings">
+    **66% fewer tokens processed, 33% time saved**
+  </Step>
+</Steps>
+
+<Check>**Result**: Catch bad tool names, missing params, constraint violations **as they appear**</Check>
+
+## How It Works
+
+### Incremental Parsing
+
+The `StreamingValidator` parses GLYPH character-by-character:
+
+```typescript
+const validator = new StreamingValidator(registry);
+
+for await (const token of llmStream) {
+  const result = validator.push(token);
+  
+  if (result.toolName && !result.toolAllowed) {
+    await cancelStream();
+    break;  // Stop at token 5, not token 50
+  }
+  
+  if (result.errors.length > 0) {
+    await cancelStream();
+    break;  // Constraint violation detected
+  }
+}
+```
+
+### Validation Timeline
+
+From the [Streaming Validation Report](https://github.com/Neumenon/glyph/blob/main/docs/reports/STREAMING_VALIDATION_REPORT.md):
+
+<Tabs>
+  <Tab title="Early Tool Detection">
+    **Question**: When do we know which tool is being called?
+    
+    | Prompt | Tool | Detected At | Total Tokens | Detection % |
+    |--------|------|-------------|--------------|-------------|
+    | Search for "AI news" | search | Token 6 | 12 | **50%** |
+    | Calculate expression | calculate | Token 6 | 12 | **50%** |
+    | Browse URL | browse | Token 6 | 12 | **50%** |
+    | Execute command | execute | Token 6 | 11 | **55%** |
+    
+    **Tool identity known at 50% through response.**
+    
+    <CodeGroup>
+    ```text Timeline
+    Token 1: {
+    Token 2: action
+    Token 3: =
+    Token 4: "
+    Token 5: search
+    Token 6: "           ← TOOL DETECTED HERE (50%)
+    Token 7: (space)
+    Token 8: query
+    Token 9: =
+    Token 10: "AI news"
+    Token 11: }
+    Token 12: (end)
+    ```
+    </CodeGroup>
+  </Tab>
+  
+  <Tab title="Early Rejection">
+    **Question**: Can we stop on unknown tools?
+    
+    | Prompt | Generated Tool | Stopped At | Saved Tokens |
+    |--------|----------------|------------|-------------|
+    | "delete_all" | delete_all | Token 7 | ~15 tokens |
+    | "hack_server" | (rejected) | Token 6 | ~16 tokens |
+    | "rm_rf" | rm_rf | Token 7 | ~14 tokens |
+    
+    **Unknown tools rejected immediately on detection.**
+    
+    ```glyph Example
+    {action="delete_all" target="database"}
+             ↑
+             └── Unknown tool detected here
+                 Immediately rejected
+                 No further processing
+    ```
+  </Tab>
+  
+  <Tab title="Constraint Validation">
+    **Question**: Are constraints validated per-field?
+    
+    | Constraint | Field | Error Type | Detected At |
+    |------------|-------|------------|-----------|
+    | max_results=500 (max 100) | max_results | CONSTRAINT_MAX | Token 14/14 |
+    | url="file:///etc/passwd" | url | CONSTRAINT_PATTERN | Token 13/13 |
+    | precision=99 (max 15) | precision | CONSTRAINT_MAX | Token 15/15 |
+    
+    **Violations caught as each field completes.**
+    
+    ```glyph Validation order
+    {action="search" query="test" max_results=500}
+     ↑               ↑             ↑
+     │               │             └── CONSTRAINT_MAX detected
+     │               └── Field validated (OK)
+     └── Tool validated (OK)
+    ```
+  </Tab>
+  
+  <Tab title="Latency Savings">
+    **Comparative Test**: Same request, two methods
+    
+    | Method | Tokens Processed | Time | Outcome |
+    |--------|-----------------|------|--------|
+    | Stream + Early Stop | 10 | 139ms | ✓ REJECTED |
+    | Wait for Full Response | 29 | 206ms | ✓ REJECTED (late) |
+    
+    **Savings:**
+    - **66% fewer tokens** (19/29 saved)
+    - **33% less time** (67ms saved)
+    
+    <Info>Early stopping prevents wasting compute on invalid requests</Info>
+  </Tab>
+</Tabs>
+
+## Implementation
+
+### Define Tool Registry
+
+First, register your tools with schemas:
+
+<CodeGroup>
+```typescript TypeScript
+import { StreamingValidator, ToolRegistry } from 'glyph-js';
+
+const registry = new ToolRegistry();
+
+registry.register({
+  name: 'search',
+  description: 'Search the web',
+  args: {
+    query: { 
+      type: 'string', 
+      required: true, 
+      minLen: 1, 
+      maxLen: 500 
+    },
+    max_results: { 
+      type: 'int', 
+      min: 1, 
+      max: 100 
+    },
+    sources: { 
+      type: 'array' 
+    },
+  },
+});
+
+registry.register({
+  name: 'calculate',
+  args: {
+    expression: { 
+      type: 'string', 
+      required: true 
+    },
+    precision: { 
+      type: 'int', 
+      min: 0, 
+      max: 15 
+    },
+  },
+});
+
+registry.register({
+  name: 'browse',
+  args: {
+    url: { 
+      type: 'string', 
+      required: true, 
+      pattern: /^https?:\/\// 
+    },
+    timeout: { 
+      type: 'int', 
+      min: 1, 
+      max: 120 
+    },
+  },
+});
+```
+
+```python Python
+from glyph import StreamingValidator, ToolRegistry
+
+registry = ToolRegistry()
+
+registry.register(
+    name='search',
+    description='Search the web',
+    args={
+        'query': {'type': 'str', 'required': True, 'min_len': 1},
+        'max_results': {'type': 'int', 'min': 1, 'max': 100},
+        'sources': {'type': 'array'},
+    }
+)
+
+registry.register(
+    name='calculate',
+    args={
+        'expression': {'type': 'str', 'required': True},
+        'precision': {'type': 'int', 'min': 0, 'max': 15},
+    }
+)
+
+registry.register(
+    name='browse',
+    args={
+        'url': {'type': 'str', 'required': True, 'pattern': r'^https?://'},
+        'timeout': {'type': 'int', 'min': 1, 'max': 120},
+    }
+)
+```
+</CodeGroup>
+
+### Stream and Validate
+
+<CodeGroup>
+```typescript TypeScript
+const validator = new StreamingValidator(registry);
+let earlyStop: string | null = null;
+
+const stream = await llm.stream(prompt);
+
+for await (const token of stream) {
+  const result = validator.push(token);
+  
+  // Early reject unknown tools
+  if (result.toolName && !result.toolAllowed) {
+    earlyStop = `Unknown tool: ${result.toolName}`;
+    await stream.cancel();
+    break;
+  }
+  
+  // Early reject constraint violations
+  if (result.errors.length > 0) {
+    earlyStop = result.errors[0].message;
+    await stream.cancel();
+    break;
+  }
+}
+
+if (earlyStop) {
+  console.error('Validation failed:', earlyStop);
+  return;
+}
+
+const finalResult = validator.getState();
+
+if (finalResult.valid && finalResult.complete) {
+  // Execute tool
+  await executeTool(finalResult.toolName, finalResult.fields);
+}
+```
+
+```python Python
+validator = StreamingValidator(registry)
+early_stop = None
+
+async for token in llm_stream(prompt):
+    result = validator.feed(token)
+    
+    # Early reject unknown tools
+    if result.tool_name and not result.tool_allowed:
+        early_stop = f"Unknown tool: {result.tool_name}"
+        await stream.cancel()
+        break
+    
+    # Early reject constraint violations
+    if result.errors:
+        early_stop = result.errors[0].message
+        await stream.cancel()
+        break
+
+if early_stop:
+    print(f"Validation failed: {early_stop}")
+    return
+
+final_result = validator.get_state()
+
+if final_result.valid and final_result.complete:
+    # Execute tool
+    await execute_tool(final_result.tool_name, final_result.fields)
+```
+</CodeGroup>
+
+### Validation Result
+
+The validator returns detailed state:
+
+```typescript
+interface ValidationResult {
+  complete: boolean;              // Generation finished?
+  valid: boolean;                 // No errors?
+  state: ValidatorState;          // waiting | in_object | complete | error
+  toolName: string | null;        // Detected tool name
+  toolAllowed: boolean | null;    // Tool in registry?
+  errors: ValidationError[];      // All errors
+  fields: Record<string, FieldValue>;  // Parsed fields
+  tokenCount: number;             // Tokens processed
+  charCount: number;              // Characters processed
+  
+  // Timing metrics
+  toolDetectedAtToken: number;    // When tool detected
+  toolDetectedAtChar: number;
+  toolDetectedAtTime: number;     // Milliseconds
+  firstErrorAtToken: number;      // When first error
+  firstErrorAtTime: number;
+  completeAtToken: number;        // When complete
+  completeAtTime: number;
+  
+  timeline: TimelineEvent[];      // Full event log
+}
+```
+
+## Error Detection
+
+### Early Detection Types
+
+<AccordionGroup>
+  <Accordion title="Unknown Tool" icon="question">
+    **Detected**: As soon as tool name completes (~token 6)
+    
+    ```glyph
+    {action="unknown_tool" ...}
+            ↑
+            └── Not in registry → STOP
+    ```
+    
+    **Error Code**: `UNKNOWN_TOOL`
+    
+    **Action**: Cancel immediately, no need to parse arguments
+  </Accordion>
+  
+  <Accordion title="Missing Tool" icon="exclamation">
+    **Detected**: When `}` reached without tool field
+    
+    ```glyph
+    {query="test" limit=5}
+                         ↑
+                         └── No 'action' field → ERROR
+    ```
+    
+    **Error Code**: `MISSING_TOOL`
+    
+    **Action**: Return error after completion
+  </Accordion>
+  
+  <Accordion title="Type Mismatch" icon="triangle-exclamation">
+    **Detected**: As soon as value type is clear
+    
+    ```glyph
+    {action="search" max_results="ten"}
+                                  ↑
+                                  └── Expected int, got string → ERROR
+    ```
+    
+    **Error Code**: `INVALID_TYPE`
+    
+    **Action**: Can cancel or continue based on severity
+  </Accordion>
+  
+  <Accordion title="Constraint Violation" icon="ban">
+    **Detected**: When field value completes
+    
+    ```glyph
+    {action="search" max_results=500 ...}
+                                  ↑
+                                  └── max=100 violated → ERROR
+    ```
+    
+    **Error Codes**:
+    - `CONSTRAINT_MIN`: Value below minimum
+    - `CONSTRAINT_MAX`: Value above maximum
+    - `CONSTRAINT_LEN`: String too short/long
+    - `CONSTRAINT_PATTERN`: Regex doesn't match
+    - `CONSTRAINT_ENUM`: Not in allowed values
+    
+    **Action**: Cancel immediately or accumulate errors
+  </Accordion>
+  
+  <Accordion title="Missing Required" icon="asterisk">
+    **Detected**: After parsing completes
+    
+    ```glyph
+    {action="search" max_results=10}
+                                     ↑
+                                     └── Missing required 'query' → ERROR
+    ```
+    
+    **Error Code**: `MISSING_REQUIRED`
+    
+    **Action**: Return error, cannot execute
+  </Accordion>
+</AccordionGroup>
+
+### Supported Constraints
+
+| Constraint | Type | Example | When Validated |
+|------------|------|---------|---------------|
+| `required` | All | `{required: true}` | At completion |
+| `min` | int/float | `{min: 1, max: 100}` | When value complete |
+| `max` | int/float | `{min: 1, max: 100}` | When value complete |
+| `minLen` | string | `{minLen: 1, maxLen: 500}` | When string complete |
+| `maxLen` | string | `{minLen: 1, maxLen: 500}` | When string complete |
+| `pattern` | string | `{pattern: /^https?:\/\//}` | When string complete |
+| `enumValues` | string | `{enumValues: ['a', 'b']}` | When value complete |
+
+## Real-World Benefits
+
+### 1. Cost Savings
+
+<Tabs>
+  <Tab title="Token Savings">
+    **Scenario**: 10% of tool calls have errors
+    
+    ```text
+    Without streaming validation:
+    100 calls × 50 tokens/call × 10% error rate = 500 wasted tokens
+    
+    With streaming validation:
+    100 calls × 10 tokens/call × 10% error rate = 100 wasted tokens
+    
+    Savings: 400 tokens (80% reduction on errors)
+    ```
+    
+    At scale: **1M calls/month with 10% errors = 400K tokens saved/month**
+  </Tab>
+  
+  <Tab title="Latency Savings">
+    **Scenario**: Average error detected at 50% generation
+    
+    ```text
+    Full generation: 2000ms
+    Early stop: 1000ms (50%)
+    
+    Saved per error: 1000ms
+    100K errors/month: 100K seconds = 27.8 hours saved
+    ```
+    
+    **Result**: Faster error feedback, better UX
+  </Tab>
+</Tabs>
+
+### 2. Security
+
+<CodeGroup>
+```typescript Prevent unauthorized tools
+const validator = new StreamingValidator(registry);
+
+validator.on('toolDetected', async (tool) => {
+  if (!userHasPermission(currentUser, tool)) {
+    await stream.cancel();
+    throw new Error(`User lacks permission for ${tool}`);
+  }
+});
+
+// Result: Unauthorized tools caught at token ~6, not token 50
+```
+</CodeGroup>
+
+### 3. Resource Preparation
+
+<CodeGroup>
+```typescript Parallel resource allocation
+const validator = new StreamingValidator(registry);
+
+validator.on('toolDetected', async (tool) => {
+  // Start preparing while generation continues
+  if (tool === 'search') {
+    await prepareSearchBackend();
+  } else if (tool === 'browse') {
+    await warmupBrowser();
+  } else if (tool === 'execute') {
+    await allocateSandbox();
+  }
+});
+
+// Result: Resources ready by the time generation completes
+```
+</CodeGroup>
+
+### 4. User Feedback
+
+<CodeGroup>
+```typescript Live progress updates
+const validator = new StreamingValidator(registry);
+
+validator.on('toolDetected', (tool) => {
+  ui.showMessage(`Preparing ${tool}...`);
+});
+
+validator.on('fieldParsed', (field, value) => {
+  ui.updateField(field, value);
+});
+
+validator.on('error', (error) => {
+  ui.showError(error.message);
+  stream.cancel();
+});
+
+// Result: Users see progress in real-time
+```
+</CodeGroup>
+
+## Advanced Patterns
+
+### Pattern 1: Allow List
+
+Restrict tools based on context:
+
+```typescript
+const allowedTools = new Set(['search', 'calculate']);
+
+const validator = new StreamingValidator(registry);
+
+validator.push(token);
+if (result.toolName && !allowedTools.has(result.toolName)) {
+  await stream.cancel();
+  throw new Error(`Tool ${result.toolName} not allowed in this context`);
+}
+```
+
+### Pattern 2: Progressive Validation
+
+Accumulate errors instead of stopping:
+
+```typescript
+const errors: ValidationError[] = [];
+
+for await (const token of stream) {
+  const result = validator.push(token);
+  
+  if (result.errors.length > errors.length) {
+    // New error detected
+    const newErrors = result.errors.slice(errors.length);
+    errors.push(...newErrors);
+    
+    // Continue parsing to find all errors
+  }
+}
+
+if (errors.length > 0) {
+  console.error('Multiple validation errors:', errors);
+}
+```
+
+### Pattern 3: Timeout Detection
+
+Detect when generation stalls:
+
+```typescript
+const TIMEOUT_MS = 5000;
+let lastTokenTime = Date.now();
+
+const timeoutCheck = setInterval(() => {
+  if (Date.now() - lastTokenTime > TIMEOUT_MS) {
+    console.error('Generation timed out');
+    stream.cancel();
+    clearInterval(timeoutCheck);
+  }
+}, 1000);
+
+for await (const token of stream) {
+  lastTokenTime = Date.now();
+  validator.push(token);
+}
+
+clearInterval(timeoutCheck);
+```
+
+## Comparison: JSON vs GLYPH
+
+| Feature | JSON Streaming | GLYPH Streaming |
+|---------|---------------|----------------|
+| Parse complexity | Higher (state machine) | Lower (simpler syntax) |
+| Tool detection | ~Token 9 | ~Token 6 (33% earlier) |
+| Error recovery | Complex | Simple |
+| Incremental validation | Possible but harder | Easy |
+| Token efficiency | Baseline | 40-60% fewer tokens |
+
+<Info>
+GLYPH's simpler syntax makes streaming validation more reliable and easier to implement.
+</Info>
+
+## Performance
+
+From the [Streaming Validation Report](https://github.com/Neumenon/glyph/blob/main/docs/reports/STREAMING_VALIDATION_REPORT.md):
+
+**llama3.2:3b model:**
+
+| Metric | Value |
+|--------|-------|
+| Tool detection | 50% through response |
+| Token savings on rejection | 66% |
+| Time savings on rejection | 33% |
+| Earlier authorization | 60% earlier (105ms vs 176ms) |
+| Overhead per token | &lt;1ms |
+
+<Check>All measurements from **real LLM streaming**, not synthetic tests</Check>
+
+## Summary
+
+<CardGroup cols={2}>
+  <Card title="Early Detection" icon="radar">
+    Tool name detected at **50% through response**
+  </Card>
+  
+  <Card title="Token Savings" icon="coins">
+    Save **66% of tokens** on rejected calls
+  </Card>
+  
+  <Card title="Latency Reduction" icon="gauge-high">
+    **33% faster** error detection
+  </Card>
+  
+  <Card title="Security" icon="shield">
+    Catch unauthorized tools **immediately**
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Format Reference" icon="code" href="/concepts/format">
+    Learn GLYPH syntax
+  </Card>
+  
+  <Card title="Token Savings" icon="coins" href="/concepts/token-savings">
+    Understand token efficiency
+  </Card>
+  
+  <Card title="Streaming Report" icon="chart-line" href="https://github.com/Neumenon/glyph/blob/main/docs/reports/STREAMING_VALIDATION_REPORT.md">
+    Full benchmark results
+  </Card>
+  
+  <Card title="API Reference" icon="book" href="/api-reference">
+    Complete API documentation
+  </Card>
+</CardGroup>

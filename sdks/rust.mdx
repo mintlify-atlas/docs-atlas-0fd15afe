@@ -1,0 +1,545 @@
+---
+title: Rust SDK
+description: GLYPH codec for Rust - token-efficient serialization with type safety
+---
+
+## Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+glyph-codec = "1.0"
+serde_json = "1.0"  # For JSON bridge
+```
+
+## Quick Start
+
+```rust
+use glyph_codec::{from_json, canonicalize_loose, GValue};
+use serde_json::json;
+
+fn main() {
+    // JSON → GLYPH (30-50% more token-efficient)
+    let data = json!({
+        "action": "search",
+        "query": "weather in NYC",
+        "max_results": 10
+    });
+    
+    let gvalue = from_json(&data);
+    let glyph = canonicalize_loose(&gvalue);
+    println!("{}", glyph);
+    // Output: {action=search max_results=10 query="weather in NYC"}
+}
+```
+
+## Core API
+
+### GValue Type
+
+```rust
+use glyph_codec::GValue;
+
+// Create values
+let null_val = GValue::Null;
+let bool_val = GValue::Bool(true);
+let int_val = GValue::Int(42);
+let float_val = GValue::Float(3.14);
+let str_val = GValue::Str("hello".to_string());
+let bytes_val = GValue::Bytes(vec![1, 2, 3]);
+
+// Lists
+let list = GValue::List(vec![
+    GValue::Int(1),
+    GValue::Int(2),
+    GValue::Int(3),
+]);
+
+// Maps
+use glyph_codec::MapEntry;
+let map = GValue::Map(vec![
+    MapEntry::new("name".to_string(), GValue::Str("Alice".to_string())),
+    MapEntry::new("age".to_string(), GValue::Int(30)),
+]);
+```
+
+### Canonicalization
+
+```rust
+use glyph_codec::{canonicalize_loose, canonicalize_loose_no_tabular};
+
+// Default: auto-tabular enabled
+let text = canonicalize_loose(&value);
+
+// Without auto-tabular
+let text = canonicalize_loose_no_tabular(&value);
+```
+
+### JSON Bridge
+
+```rust
+use glyph_codec::{from_json, to_json};
+use serde_json::{json, Value as JsonValue};
+
+// JSON → GValue
+let json = json!({
+    "name": "Alice",
+    "age": 30,
+    "active": true
+});
+let gvalue = from_json(&json);
+
+// GValue → JSON
+let back_to_json = to_json(&gvalue);
+assert_eq!(json, back_to_json);
+```
+
+## Pattern Matching
+
+```rust
+use glyph_codec::GValue;
+
+match value {
+    GValue::Null => println!("null"),
+    GValue::Bool(b) => println!("bool: {}", b),
+    GValue::Int(n) => println!("int: {}", n),
+    GValue::Float(f) => println!("float: {}", f),
+    GValue::Str(s) => println!("string: {}", s),
+    GValue::List(items) => {
+        for item in items {
+            println!("item: {:?}", item);
+        }
+    }
+    GValue::Map(entries) => {
+        for entry in entries {
+            println!("{}: {:?}", entry.key, entry.value);
+        }
+    }
+    _ => println!("other type"),
+}
+```
+
+## Helper Functions
+
+### get_map_value
+
+```rust
+use glyph_codec::{GValue, get_map_value};
+
+let map = GValue::Map(vec![
+    MapEntry::new("name".to_string(), GValue::Str("Alice".to_string())),
+    MapEntry::new("age".to_string(), GValue::Int(30)),
+]);
+
+// Get value by key
+if let Some(name) = get_map_value(&map, "name") {
+    if let GValue::Str(s) = name {
+        println!("Name: {}", s);
+    }
+}
+```
+
+### as_* Methods
+
+```rust
+// Extract typed values with pattern matching
+if let GValue::Int(n) = value {
+    println!("Integer: {}", n);
+}
+
+if let GValue::Str(s) = value {
+    println!("String: {}", s);
+}
+
+if let GValue::List(items) = value {
+    println!("List length: {}", items.len());
+}
+```
+
+## MapEntry
+
+```rust
+use glyph_codec::MapEntry;
+
+// Create map entry
+let entry = MapEntry {
+    key: "name".to_string(),
+    value: GValue::Str("Alice".to_string()),
+};
+
+// Or use new() constructor
+let entry = MapEntry::new(
+    "age".to_string(),
+    GValue::Int(30)
+);
+```
+
+## Error Handling
+
+All operations return `Result<T, GlyphError>`:
+
+```rust
+use glyph_codec::{from_json, to_json, GlyphError};
+use serde_json::json;
+
+fn process() -> Result<(), GlyphError> {
+    let data = json!({"x": 1, "y": 2});
+    let gvalue = from_json(&data);
+    
+    let glyph = canonicalize_loose(&gvalue);
+    
+    // Operations are infallible for valid GValues
+    // Errors mainly occur in parsing (not yet implemented)
+    
+    Ok(())
+}
+
+match process() {
+    Ok(_) => println!("Success"),
+    Err(e) => eprintln!("Error: {}", e),
+}
+```
+
+## Real-World Examples
+
+### LLM Tool Calls
+
+```rust
+use glyph_codec::{from_json, canonicalize_loose};
+use serde_json::json;
+
+fn handle_tool_call(action: &str, args: &GValue) -> String {
+    // Agent receives args as GLYPH (30-50% fewer tokens)
+    let glyph = canonicalize_loose(args);
+    
+    // Execute and return results in GLYPH
+    let results = execute_action(action, args);
+    let result_gvalue = from_json(&results);
+    canonicalize_loose(&result_gvalue)
+}
+
+fn main() {
+    let args = json!({
+        "action": "search",
+        "query": "weather in SF",
+        "max_results": 5
+    });
+    
+    let gvalue = from_json(&args);
+    let response = handle_tool_call("search", &gvalue);
+    println!("Response: {}", response);
+}
+```
+
+### Serialize API Request
+
+```rust
+use glyph_codec::{from_json, canonicalize_loose};
+use serde::Serialize;
+use serde_json::json;
+
+#[derive(Serialize)]
+struct User {
+    id: u32,
+    name: String,
+    score: u32,
+}
+
+fn serialize_users(users: Vec<User>) -> String {
+    // Convert to JSON value
+    let json = serde_json::to_value(users).unwrap();
+    
+    // Convert to GLYPH (auto-tabular for homogeneous lists)
+    let gvalue = from_json(&json);
+    canonicalize_loose(&gvalue)
+    
+    // Output:
+    // @tab _ rows=3 cols=3 [id name score]
+    // |1|Alice|95|
+    // |2|Bob|87|
+    // |3|Carol|92|
+    // @end
+}
+
+fn main() {
+    let users = vec![
+        User { id: 1, name: "Alice".to_string(), score: 95 },
+        User { id: 2, name: "Bob".to_string(), score: 87 },
+        User { id: 3, name: "Carol".to_string(), score: 92 },
+    ];
+    
+    let compact = serialize_users(users);
+    println!("{}", compact);
+}
+```
+
+### Deserialize from GLYPH
+
+```rust
+use glyph_codec::{from_json, to_json};
+use serde::Deserialize;
+use serde_json::Value as JsonValue;
+
+#[derive(Deserialize, Debug)]
+struct SearchArgs {
+    action: String,
+    query: String,
+    max_results: u32,
+}
+
+fn parse_tool_call(glyph_text: &str) -> Result<SearchArgs, Box<dyn std::error::Error>> {
+    // In a real implementation, you'd parse the GLYPH text
+    // For now, demonstrate the flow:
+    
+    // 1. Parse GLYPH → GValue (parser not yet in Rust SDK)
+    // 2. GValue → JSON
+    // 3. JSON → typed struct
+    
+    // Placeholder: assume we have a GValue
+    let json = json!({
+        "action": "search",
+        "query": "weather",
+        "max_results": 10
+    });
+    
+    let gvalue = from_json(&json);
+    let json_back = to_json(&gvalue);
+    let args: SearchArgs = serde_json::from_value(json_back)?;
+    
+    Ok(args)
+}
+```
+
+## Type Checking
+
+```rust
+use glyph_codec::GValue;
+
+fn is_string(value: &GValue) -> bool {
+    matches!(value, GValue::Str(_))
+}
+
+fn is_integer(value: &GValue) -> bool {
+    matches!(value, GValue::Int(_))
+}
+
+fn is_list(value: &GValue) -> bool {
+    matches!(value, GValue::List(_))
+}
+
+fn is_map(value: &GValue) -> bool {
+    matches!(value, GValue::Map(_))
+}
+```
+
+## Cloning and Ownership
+
+```rust
+use glyph_codec::GValue;
+
+// GValue implements Clone
+let original = GValue::Str("hello".to_string());
+let cloned = original.clone();
+
+// Deep clone for nested structures
+let map = GValue::Map(vec![
+    MapEntry::new("x".to_string(), GValue::Int(1)),
+]);
+let map_clone = map.clone();
+
+// Move semantics
+fn take_ownership(value: GValue) {
+    println!("Owned: {:?}", value);
+}
+
+take_ownership(original); // original moved
+// println!("{:?}", original); // Error: value moved
+
+// Borrow instead
+fn borrow_value(value: &GValue) {
+    println!("Borrowed: {:?}", value);
+}
+
+borrow_value(&cloned); // cloned still usable
+```
+
+## Building Complex Structures
+
+```rust
+use glyph_codec::{GValue, MapEntry};
+
+// Nested map with list
+let data = GValue::Map(vec![
+    MapEntry::new(
+        "users".to_string(),
+        GValue::List(vec![
+            GValue::Map(vec![
+                MapEntry::new("id".to_string(), GValue::Int(1)),
+                MapEntry::new("name".to_string(), GValue::Str("Alice".to_string())),
+            ]),
+            GValue::Map(vec![
+                MapEntry::new("id".to_string(), GValue::Int(2)),
+                MapEntry::new("name".to_string(), GValue::Str("Bob".to_string())),
+            ]),
+        ])
+    ),
+    MapEntry::new("count".to_string(), GValue::Int(2)),
+]);
+
+let glyph = canonicalize_loose(&data);
+println!("{}", glyph);
+// {count=2 users=@tab _ rows=2 cols=2 [id name]
+// |1|Alice|
+// |2|Bob|
+// @end}
+```
+
+## Debug and Display
+
+```rust
+use glyph_codec::GValue;
+
+let value = GValue::Map(vec![
+    MapEntry::new("x".to_string(), GValue::Int(1)),
+]);
+
+// Debug output (Rust debug format)
+println!("{:?}", value);
+// Map([MapEntry { key: "x", value: Int(1) }])
+
+// Pretty debug
+println!("value = {:#?}", value);
+
+// GLYPH output (use canonicalize_loose)
+let glyph = canonicalize_loose(&value);
+println!("{}", glyph);
+// {x=1}
+```
+
+## Integration with Serde
+
+```rust
+use glyph_codec::{from_json, to_json};
+use serde::{Serialize, Deserialize};
+use serde_json::json;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {
+    host: String,
+    port: u16,
+    enabled: bool,
+}
+
+fn main() {
+    let config = Config {
+        host: "localhost".to_string(),
+        port: 8080,
+        enabled: true,
+    };
+    
+    // Struct → JSON → GValue → GLYPH
+    let json = serde_json::to_value(&config).unwrap();
+    let gvalue = from_json(&json);
+    let glyph = canonicalize_loose(&gvalue);
+    println!("GLYPH: {}", glyph);
+    // {enabled=t host=localhost port=8080}
+    
+    // Round-trip: GLYPH → GValue → JSON → Struct
+    let json_back = to_json(&gvalue);
+    let config_back: Config = serde_json::from_value(json_back).unwrap();
+    println!("Config: {:?}", config_back);
+}
+```
+
+## Performance Considerations
+
+1. **Cloning** - GValue uses `String` and `Vec`, so cloning is O(n)
+2. **Canonicalization** - O(n) with efficient string building
+3. **Map lookup** - O(n) linear search (use for small maps)
+4. **Auto-tabular** - Automatic detection for ≥3 homogeneous maps
+
+## Type Definitions
+
+```rust
+use glyph_codec::{GValue, MapEntry};
+
+// Core enum
+pub enum GValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bytes(Vec<u8>),
+    List(Vec<GValue>),
+    Map(Vec<MapEntry>),
+}
+
+// Map entry
+pub struct MapEntry {
+    pub key: String,
+    pub value: GValue,
+}
+
+impl MapEntry {
+    pub fn new(key: String, value: GValue) -> Self {
+        MapEntry { key, value }
+    }
+}
+```
+
+## Testing
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glyph_codec::{from_json, canonicalize_loose, to_json};
+    use serde_json::json;
+
+    #[test]
+    fn test_roundtrip() {
+        let original = json!({
+            "name": "Alice",
+            "age": 30,
+            "active": true
+        });
+        
+        let gvalue = from_json(&original);
+        let glyph = canonicalize_loose(&gvalue);
+        let back_to_json = to_json(&gvalue);
+        
+        assert_eq!(original, back_to_json);
+    }
+    
+    #[test]
+    fn test_auto_tabular() {
+        let data = json!([
+            {"id": 1, "name": "Alice"},
+            {"id": 2, "name": "Bob"},
+            {"id": 3, "name": "Carol"}
+        ]);
+        
+        let gvalue = from_json(&data);
+        let glyph = canonicalize_loose(&gvalue);
+        
+        // Should use tabular format
+        assert!(glyph.contains("@tab"));
+        assert!(glyph.contains("@end"));
+    }
+}
+```
+
+## Future Features
+
+The Rust SDK currently provides core types and JSON bridge. Future versions will add:
+
+- **Parser** - Parse GLYPH text → GValue
+- **Schema support** - Type validation and wire keys
+- **Streaming** - Incremental parsing and emission
+- **Time type** - Datetime support
+- **RefID type** - Reference IDs (^prefix:value)
+- **Struct/Sum types** - Tagged types for better semantics
+
+For now, use the JSON bridge as the primary interface.

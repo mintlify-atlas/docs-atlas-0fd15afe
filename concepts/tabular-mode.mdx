@@ -1,0 +1,662 @@
+---
+title: 'Auto-Tabular Mode'
+description: 'Compress homogeneous lists to tables for 50-70% token savings'
+icon: 'table'
+---
+
+<Info>**Repeated keys waste tokens. Auto-tabular mode compresses arrays of objects by 50-70%.**</Info>
+
+When you have lists of similar objects (search results, database rows, logs), GLYPH automatically detects homogeneity and emits them as compact tables.
+
+## The Problem
+
+Homogeneous arrays repeat keys for every element:
+
+```json JSON - Keys repeated 3 times
+[
+  {"id": "doc1", "score": 0.95, "title": "GLYPH Guide"},
+  {"id": "doc2", "score": 0.89, "title": "API Docs"},
+  {"id": "doc3", "score": 0.84, "title": "Tutorial"}
+]
+```
+
+**120 tokens** - `id`, `score`, and `title` appear 3 times each
+
+<Warning>
+With 50 results, keys appear 50 times. This is massively redundant.
+</Warning>
+
+## The Solution
+
+Tabular mode lists keys once, then rows:
+
+```glyph GLYPH tabular - Keys listed once
+@tab _ [id score title]
+|doc1|0.95|GLYPH Guide|
+|doc2|0.89|API Docs|
+|doc3|0.84|Tutorial|
+@end
+```
+
+**45 tokens** - Keys appear once in header
+
+<Check>**62% reduction** - Savings scale linearly with row count</Check>
+
+## How It Works
+
+### Auto-Detection
+
+GLYPH automatically detects when a list qualifies for tabular emission:
+
+<Steps>
+  <Step title="Check eligibility">
+    - Contains ≥ 3 elements (configurable)
+    - All elements are maps or structs
+    - Total column count ≤ 20 (configurable)
+    - All rows have identical keys (or `AllowMissing=true`)
+  </Step>
+  
+  <Step title="Extract schema">
+    Collect all unique keys across all rows
+  </Step>
+  
+  <Step title="Sort columns">
+    Order columns by UTF-8 byte order (same as map keys)
+  </Step>
+  
+  <Step title="Emit table">
+    Header with columns, pipe-delimited rows, footer marker
+  </Step>
+</Steps>
+
+### Syntax
+
+<CodeGroup>
+```glyph Basic Table
+@tab _ [name age city]
+Alice 28 NYC
+Bob 32 SF
+Carol 25 Austin
+@end
+```
+
+```glyph With Metadata
+@tab _ rows=120 cols=6 [id name score status created updated]
+|1|Alice|0.95|active|2025-01-01|2025-06-15|
+|2|Bob|0.89|inactive|2025-01-02|2025-06-14|
+...
+@end
+```
+
+```glyph Nested Values
+@tab _ [id meta]
+|1|{x=10}|
+|2|{x=20}|
+|3|{x=30}|
+@end
+```
+</CodeGroup>
+
+### Format Details
+
+<Tabs>
+  <Tab title="Header">
+    ```glyph
+    @tab _ [col1 col2 col3]
+    ```
+    
+    - `@tab`: Directive marker
+    - `_`: Null placeholder (for future schema refs)
+    - `[...]`: Sorted column names
+    
+    **Optional metadata**:
+    ```glyph
+    @tab _ rows=50 cols=4 [col1 col2 col3 col4]
+    ```
+  </Tab>
+  
+  <Tab title="Rows">
+    ```glyph
+    |val1|val2|val3|
+    ```
+    
+    - Pipe-delimited cells
+    - One row per line
+    - Values emitted in column order
+    - No spaces around pipes (compact)
+    
+    **Escaping pipes in values**:
+    ```glyph
+    |"value with \| pipe"|
+    ```
+  </Tab>
+  
+  <Tab title="Footer">
+    ```glyph
+    @end
+    ```
+    
+    - Marks table completion
+    - Required for stream parsing
+    - Enables detection of truncated streams
+  </Tab>
+</Tabs>
+
+## Token Savings
+
+### By Row Count
+
+From the [Codec Benchmark Report](https://github.com/Neumenon/glyph/blob/main/docs/reports/CODEC_BENCHMARK_REPORT.md):
+
+| Rows | JSON Tokens | GLYPH Loose | GLYPH Tabular | Savings vs JSON |
+|------|-------------|-------------|---------------|----------------|
+| 3 | 120 | 85 | 45 | **62%** |
+| 5 | 200 | 140 | 70 | **65%** |
+| 10 | 400 | 270 | 130 | **68%** |
+| 25 | 1,000 | 670 | 310 | **69%** |
+| 50 | 2,000 | 1,340 | 620 | **69%** |
+
+<Info>
+**Savings scale linearly**: More rows = more savings
+</Info>
+
+### Calculation
+
+**Formula**: Token savings = (repeated_keys × rows) - header_overhead
+
+```text
+Example: 50 search results, 4 fields each
+
+JSON:
+  - Per row: 4 keys × 4 tokens/key = 16 tokens
+  - Total keys: 16 × 50 = 800 tokens
+  - Values: ~600 tokens
+  - Total: 1,400 tokens
+
+GLYPH Tabular:
+  - Header: 4 keys × 4 tokens = 16 tokens
+  - Rows: ~600 tokens (values only)
+  - Total: 616 tokens
+
+Savings: 784 tokens (56%)
+```
+
+## Usage
+
+### Enabling Tabular Mode
+
+<CodeGroup>
+```python Python
+import glyph
+
+data = [
+    {"id": 1, "name": "Alice", "score": 95},
+    {"id": 2, "name": "Bob", "score": 87},
+    {"id": 3, "name": "Carol", "score": 92}
+]
+
+# Auto-detect (enabled by default in some modes)
+result = glyph.json_to_glyph(data)
+
+# Explicit tabular mode
+result = glyph.canonicalize_loose_tabular(data)
+
+# Custom options
+result = glyph.canonicalize_loose_with_opts(data, {
+    'auto_tabular': True,
+    'min_rows': 5,     # Only tables with 5+ rows
+    'max_cols': 10,    # Max 10 columns
+})
+```
+
+```typescript TypeScript
+import { canonicalizeLooseTabular, canonicalizeLooseWithOpts } from 'glyph-js';
+
+const data = [
+  { id: 1, name: 'Alice', score: 95 },
+  { id: 2, name: 'Bob', score: 87 },
+  { id: 3, name: 'Carol', score: 92 }
+];
+
+// Auto-detect tabular
+const result = canonicalizeLooseTabular(data);
+
+// Custom options
+const result = canonicalizeLooseWithOpts(data, {
+  autoTabular: true,
+  minRows: 5,
+  maxCols: 10,
+  allowMissing: false,  // Require all rows have same keys
+});
+```
+
+```go Go
+import "github.com/Neumenon/glyph/glyph"
+
+data := []interface{}{
+    map[string]interface{}{"id": 1, "name": "Alice", "score": 95},
+    map[string]interface{}{"id": 2, "name": "Bob", "score": 87},
+    map[string]interface{}{"id": 3, "name": "Carol", "score": 92},
+}
+
+value := glyph.FromJSONLoose(data)
+
+// Auto-detect tabular
+result := glyph.CanonicalizeLooseTabular(value)
+
+// Custom options
+opts := glyph.TabularLooseCanonOpts()
+opts.MinRows = 5
+opts.MaxCols = 10
+result := glyph.CanonicalizeLooseWithOpts(value, opts)
+```
+</CodeGroup>
+
+### Parsing Tables
+
+<CodeGroup>
+```python Python
+import glyph
+
+table_str = """
+@tab _ [id name score]
+|1|Alice|95|
+|2|Bob|87|
+|3|Carol|92|
+@end
+"""
+
+result = glyph.parse_tabular_loose(table_str)
+# result.columns: ['id', 'name', 'score']
+# result.rows: [
+#   {'id': 1, 'name': 'Alice', 'score': 95},
+#   {'id': 2, 'name': 'Bob', 'score': 87},
+#   {'id': 3, 'name': 'Carol', 'score': 92}
+# ]
+```
+
+```typescript TypeScript
+import { parseTabularLoose } from 'glyph-js';
+
+const tableStr = `
+@tab _ [id name score]
+|1|Alice|95|
+|2|Bob|87|
+|3|Carol|92|
+@end
+`;
+
+const result = parseTabularLoose(tableStr);
+// result.columns: ['id', 'name', 'score']
+// result.rows: [
+//   { id: 1, name: 'Alice', score: 95 },
+//   { id: 2, name: 'Bob', score: 87 },
+//   { id: 3, name: 'Carol', score: 92 }
+// ]
+```
+
+```go Go
+import "github.com/Neumenon/glyph/glyph"
+
+tableStr := `
+@tab _ [id name score]
+|1|Alice|95|
+|2|Bob|87|
+|3|Carol|92|
+@end
+`
+
+result, err := glyph.ParseTabularLoose([]byte(tableStr))
+// result is []map[string]interface{}
+```
+</CodeGroup>
+
+## Column Handling
+
+### Column Ordering
+
+Columns are sorted by UTF-8 byte order (same as map keys):
+
+```glyph
+Input:  [{"score": 0.95, "id": "doc1", "title": "Guide"}]
+Output:
+@tab _ [id score title]  // Sorted: i < s < t
+|doc1|0.95|Guide|
+@end
+```
+
+<Info>
+Consistent ordering ensures deterministic output for fingerprinting.
+</Info>
+
+### Missing Values
+
+When `AllowMissing=true`, rows with missing keys use `_` (null):
+
+<Tabs>
+  <Tab title="Sparse Data">
+    ```json
+    [
+      {"id": 1, "name": "Alice"},
+      {"id": 2},
+      {"id": 3, "name": "Carol"}
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="Tabular Output">
+    ```glyph
+    @tab _ [id name]
+    |1|Alice|
+    |2|_|
+    |3|Carol|
+    @end
+    ```
+    
+    Row 2 has missing `name`, filled with `_`
+  </Tab>
+</Tabs>
+
+### Nested Values
+
+Complex values are emitted inline:
+
+<Tabs>
+  <Tab title="Input">
+    ```json
+    [
+      {"id": 1, "meta": {"x": 10, "y": 20}},
+      {"id": 2, "meta": {"x": 30, "y": 40}},
+      {"id": 3, "meta": {"x": 50, "y": 60}}
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="Tabular Output">
+    ```glyph
+    @tab _ [id meta]
+    |1|{x=10 y=20}|
+    |2|{x=30 y=40}|
+    |3|{x=50 y=60}|
+    @end
+    ```
+    
+    Nested maps emitted as GLYPH within cells
+  </Tab>
+</Tabs>
+
+## Configuration Options
+
+From the [LOOSE_MODE_SPEC](https://github.com/Neumenon/glyph/blob/main/docs/LOOSE_MODE_SPEC.md):
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `AutoTabular` | bool | varies | Enable auto-tabular detection |
+| `MinRows` | int | 3 | Minimum rows to trigger tabular |
+| `MaxCols` | int | 20 | Maximum columns allowed |
+| `AllowMissing` | bool | true | Allow rows with missing keys |
+| `NullStyle` | enum | underscore | `symbol` for ∅, `underscore` for _ |
+| `SchemaRef` | string | "" | Schema hash/id for @schema header |
+| `KeyDict` | []string | nil | Key dictionary for compact keys |
+| `UseCompactKeys` | bool | false | Emit #N instead of field names |
+
+### Examples
+
+<CodeGroup>
+```python Strict mode (all keys required)
+opts = {
+    'auto_tabular': True,
+    'allow_missing': False,  # All rows must have same keys
+}
+result = glyph.canonicalize_loose_with_opts(data, opts)
+# Raises error if any row has different keys
+```
+
+```typescript Large tables only
+const opts = {
+  autoTabular: true,
+  minRows: 10,      // Only tables with 10+ rows
+  maxCols: 50,      // Allow up to 50 columns
+};
+const result = canonicalizeLooseWithOpts(data, opts);
+```
+
+```go Custom null style
+opts := glyph.TabularLooseCanonOpts()
+opts.NullStyle = glyph.NullStyleSymbol  // Use ∅ instead of _
+result := glyph.CanonicalizeLooseWithOpts(value, opts)
+```
+</CodeGroup>
+
+## Use Cases
+
+### RAG Search Results
+
+<Tabs>
+  <Tab title="Scenario">
+    Retrieve 25 documents from vector database with scores and metadata.
+  </Tab>
+  
+  <Tab title="JSON (456 tokens)">
+    ```json
+    [
+      {"id": "doc1", "score": 0.95, "title": "GLYPH Guide", "url": "..."},
+      {"id": "doc2", "score": 0.89, "title": "API Docs", "url": "..."},
+      // ... 23 more
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="GLYPH Tabular (220 tokens)">
+    ```glyph
+    @tab _ [id score title url]
+    |doc1|0.95|GLYPH Guide|...|
+    |doc2|0.89|API Docs|...|
+    ...
+    @end
+    ```
+    
+    **52% reduction** (236 tokens saved)
+  </Tab>
+</Tabs>
+
+### Database Query Results
+
+<Tabs>
+  <Tab title="Scenario">
+    Export 100 user records for agent processing.
+  </Tab>
+  
+  <Tab title="JSON (~2,000 tokens)">
+    ```json
+    [
+      {"id": 1, "name": "Alice", "email": "alice@example.com", "active": true},
+      {"id": 2, "name": "Bob", "email": "bob@example.com", "active": false},
+      // ... 98 more
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="GLYPH Tabular (~800 tokens)">
+    ```glyph
+    @tab _ rows=100 cols=4 [active email id name]
+    |t|alice@example.com|1|Alice|
+    |f|bob@example.com|2|Bob|
+    ...
+    @end
+    ```
+    
+    **60% reduction** (1,200 tokens saved)
+  </Tab>
+</Tabs>
+
+### Log Aggregation
+
+<Tabs>
+  <Tab title="Scenario">
+    Send 50 log entries to LLM for analysis.
+  </Tab>
+  
+  <Tab title="JSON (~1,500 tokens)">
+    ```json
+    [
+      {"timestamp": "2025-01-13T12:00:00Z", "level": "error", "message": "Connection timeout"},
+      {"timestamp": "2025-01-13T12:00:01Z", "level": "info", "message": "Retry attempt 1"},
+      // ... 48 more
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="GLYPH Tabular (~600 tokens)">
+    ```glyph
+    @tab _ [timestamp level message]
+    |2025-01-13T12:00:00Z|error|Connection timeout|
+    |2025-01-13T12:00:01Z|info|Retry attempt 1|
+    ...
+    @end
+    ```
+    
+    **60% reduction** (900 tokens saved)
+  </Tab>
+</Tabs>
+
+## Metadata for Streaming
+
+Optional row/column counts enable verification:
+
+```glyph
+@tab _ rows=120 cols=6 [id name score status created updated]
+|1|Alice|0.95|active|2025-01-01|2025-06-15|
+...
+@end
+```
+
+### Benefits
+
+<CardGroup cols={2}>
+  <Card title="Truncation Detection" icon="scissors">
+    Verify all rows received: count rows and compare to metadata
+  </Card>
+  
+  <Card title="Progress Tracking" icon="chart-line">
+    Show progress: "Received 50/120 rows..."
+  </Card>
+  
+  <Card title="Stream Resync" icon="rotate">
+    Resume after interruption by skipping to known row count
+  </Card>
+  
+  <Card title="Validation" icon="check">
+    Ensure complete transmission before processing
+  </Card>
+</CardGroup>
+
+## When to Use Tabular Mode
+
+### ✅ Ideal For:
+
+<AccordionGroup>
+  <Accordion title="Search Results" icon="magnifying-glass">
+    - Vector database results
+    - Web search results  
+    - Document retrieval
+    
+    **Typical savings**: 50-60%
+  </Accordion>
+  
+  <Accordion title="Database Exports" icon="database">
+    - Query results
+    - Batch data exports
+    - CSV-like data
+    
+    **Typical savings**: 55-65%
+  </Accordion>
+  
+  <Accordion title="Log Analysis" icon="file-lines">
+    - Application logs
+    - Access logs
+    - Audit trails
+    
+    **Typical savings**: 50-60%
+  </Accordion>
+  
+  <Accordion title="Batch API Responses" icon="layer-group">
+    - List operations
+    - Bulk status checks
+    - Multi-item fetches
+    
+    **Typical savings**: 40-55%
+  </Accordion>
+</AccordionGroup>
+
+### ⚠️ Not Ideal For:
+
+<CardGroup cols={2}>
+  <Card title="Heterogeneous Data" icon="shuffle">
+    Objects with different structures don't benefit from shared schema.
+  </Card>
+  
+  <Card title="Single Items" icon="1">
+    One-element arrays have overhead, no savings.
+  </Card>
+  
+  <Card title="Deeply Nested" icon="sitemap">
+    Complex nesting in cells reduces readability.
+  </Card>
+  
+  <Card title="Wide Schemas" icon="arrows-left-right">
+    >20 columns make tables hard to read.
+  </Card>
+</CardGroup>
+
+## Performance
+
+From benchmarks:
+
+| Format | Size (bytes) | Tokens | Compression |
+|--------|-------------|--------|-------------|
+| JSON-min | 5,109 | 1,000 | 100% (baseline) |
+| GLYPH-Loose | 4,224 | 850 | 83% |
+| GLYPH-Tabular | ~3,900 | ~720 | 76% |
+
+<Check>**Tabular mode achieves best token efficiency for homogeneous data**</Check>
+
+## Summary
+
+<CardGroup cols={2}>
+  <Card title="Token Savings" icon="coins">
+    **50-70% reduction** for array data
+  </Card>
+  
+  <Card title="Linear Scaling" icon="chart-line">
+    More rows = proportionally more savings
+  </Card>
+  
+  <Card title="Automatic" icon="wand-magic-sparkles">
+    Auto-detects homogeneous lists
+  </Card>
+  
+  <Card title="Human-Readable" icon="eye">
+    Tabular format is easier to scan
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Format Reference" icon="code" href="/concepts/format">
+    Learn GLYPH syntax
+  </Card>
+  
+  <Card title="Token Savings" icon="coins" href="/concepts/token-savings">
+    Understand overall token efficiency
+  </Card>
+  
+  <Card title="LOOSE MODE Spec" icon="file-lines" href="https://github.com/Neumenon/glyph/blob/main/docs/LOOSE_MODE_SPEC.md">
+    Complete technical specification
+  </Card>
+  
+  <Card title="Benchmark Report" icon="chart-line" href="https://github.com/Neumenon/glyph/blob/main/docs/reports/CODEC_BENCHMARK_REPORT.md">
+    Full performance data
+  </Card>
+</CardGroup>

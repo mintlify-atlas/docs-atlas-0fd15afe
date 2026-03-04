@@ -1,0 +1,229 @@
+---
+title: 'Go API Overview'
+description: 'GLYPH Go package for token-optimized LLM-friendly data encoding'
+---
+
+## Overview
+
+The `glyph` Go package implements GLYPH, a token-optimized codec designed for LLM interactions. GLYPH provides a dual encoding system (GLYPH-T for text and GLYPH-B for binary) with strong typing, schema validation, and streaming support.
+
+## Installation
+
+```bash
+go get github.com/Neumenon/glyph
+```
+
+## Import
+
+```go
+import "github.com/Neumenon/glyph"
+```
+
+## Key Features
+
+- **LLM-friendly syntax**: Easy for models to emit and repair
+- **Token-efficient**: Short keys, no quotes, structural compression
+- **Strongly typed**: Schema-driven validation with constraints
+- **Streamable**: Frame-based incremental parsing
+- **Deterministic**: Canonical representation for stable hashing
+- **Round-trippable**: Seamless JSON and SJSON interop
+
+## Quick Start
+
+### Creating Values
+
+```go
+// Scalars
+null := glyph.Null()
+bool := glyph.Bool(true)
+num := glyph.Int(42)
+float := glyph.Float(3.14)
+str := glyph.Str("hello")
+ref := glyph.ID("m", "2024-01-15")
+
+// Containers
+list := glyph.List(
+    glyph.Int(1),
+    glyph.Int(2),
+    glyph.Int(3),
+)
+
+map_ := glyph.Map(
+    glyph.FieldVal("name", glyph.Str("Arsenal")),
+    glyph.FieldVal("score", glyph.Int(2)),
+)
+
+struct_ := glyph.Struct("Team",
+    glyph.FieldVal("id", glyph.ID("t", "ARS")),
+    glyph.FieldVal("name", glyph.Str("Arsenal")),
+)
+```
+
+### Parsing GLYPH-T Text
+
+```go
+// Parse with error tolerance (default)
+result, err := glyph.Parse(`Team{id=^t:ARS name="Arsenal" score=2}`)
+if err != nil {
+    return err
+}
+
+if result.HasErrors() {
+    // Handle parse errors
+    for _, e := range result.Errors {
+        fmt.Printf("Error: %s\n", e.Message)
+    }
+}
+
+value := result.Value
+```
+
+### Emitting GLYPH-T Text
+
+```go
+// Emit canonical GLYPH-T
+team := glyph.Struct("Team",
+    glyph.FieldVal("id", glyph.ID("t", "ARS")),
+    glyph.FieldVal("name", glyph.Str("Arsenal")),
+)
+
+text := glyph.Emit(team)
+// Output: Team{id=^t:ARS name=Arsenal}
+```
+
+### Working with Values
+
+```go
+// Type checking
+if value.Type() == glyph.TypeStruct {
+    structVal, _ := value.AsStruct()
+    fmt.Println("Type:", structVal.TypeName)
+}
+
+// Field access
+name := value.Get("name")
+if name != nil {
+    str, _ := name.AsStr()
+    fmt.Println("Name:", str)
+}
+
+// List iteration
+list, _ := value.AsList()
+for i, elem := range list {
+    fmt.Printf("Element %d: %v\n", i, elem)
+}
+```
+
+## Data Model
+
+GLYPH supports the following types:
+
+### Scalars
+
+- `null` - Null value (∅)
+- `bool` - Boolean (t/f)
+- `int` - 64-bit integer
+- `float` - 64-bit float
+- `str` - UTF-8 string
+- `bytes` - Binary data
+- `time` - ISO-8601 timestamp
+- `id` - Reference ID (^prefix:value)
+
+### Containers
+
+- `list` - Ordered array of values
+- `map` - Unordered key-value pairs
+- `struct` - Typed struct with named fields
+
+### Special
+
+- `sum` - Tagged union (variant type)
+- `ref` - Reference to another value
+
+## GLYPH-T Syntax
+
+```glyph
+// Struct
+Team{id=^t:ARS name="Arsenal" league=EPL}
+
+// Map
+{name:"Arsenal" score:2 points:6}
+
+// List
+[1 2 3 4 5]
+
+// Sum/Union
+Result(Success{value=42})
+
+// References
+^m:2024-01-15:ARS-LIV
+^t:ARS
+
+// Null
+∅
+
+// Booleans
+t
+f
+
+// Strings
+bare_word
+"quoted string"
+```
+
+## Error Handling
+
+The Go API uses both error returns and result types:
+
+```go
+// Parse returns ParseResult with errors and warnings
+result, err := glyph.Parse(input)
+if err != nil {
+    // Fatal parse error
+    return err
+}
+
+if result.HasErrors() {
+    // Non-fatal errors during parsing
+    for _, e := range result.Errors {
+        fmt.Printf("%s at %s\n", e.Message, e.Pos)
+    }
+}
+
+// Value accessors return errors for type mismatches
+intVal, err := value.AsInt()
+if err != nil {
+    // Type mismatch
+    return err
+}
+```
+
+## JSON Interop
+
+```go
+// GLYPH → JSON
+value := glyph.Struct("Team",
+    glyph.FieldVal("name", glyph.Str("Arsenal")),
+)
+jsonBytes, err := glyph.ToJSON(value)
+
+// JSON → GLYPH
+value, err := glyph.FromJSON(jsonBytes)
+```
+
+## Binary Encoding
+
+```go
+// GLYPH → Binary (via SJSON)
+value := glyph.Int(42)
+binary, err := glyph.EncodeBinary(value)
+
+// Binary → GLYPH
+value, err := glyph.DecodeBinary(binary)
+```
+
+## Next Steps
+
+- [Core Types](/api/go/core) - Detailed GValue API
+- [Parsing](/api/go/parsing) - Parse options and error handling
+- [Streaming](/api/go/streaming) - Incremental parsing and validation

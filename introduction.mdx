@@ -1,0 +1,329 @@
+---
+title: Introduction to GLYPH
+description: Token-efficient serialization format for AI agents. Save 50%+ tokens with streaming validation and JSON interoperability.
+---
+
+## What is GLYPH?
+
+GLYPH is a **token-efficient serialization format** designed specifically for AI agents. It reduces token usage by 40-60% compared to JSON while maintaining human readability and full JSON interoperability.
+
+<Note>
+**Why tokens matter**: Every token consumes your LLM context window and costs money. With GLYPH, you can fit more data in prompts, reduce costs, and enable longer conversations.
+</Note>
+
+### Quick Example
+
+Here's the same data in JSON vs GLYPH:
+
+<CodeGroup>
+```json JSON (30 tokens)
+{"messages":[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello!"}],"model":"gpt-4"}
+```
+
+```glyph GLYPH (16 tokens - 47% reduction)
+{msgs:[{r:u c:Hi} {r:a c:Hello!}] mdl:gpt-4}
+```
+</CodeGroup>
+
+**Result: 30 tokens → 16 tokens** (47% reduction)
+
+---
+
+## Why GLYPH?
+
+JSON wastes tokens on redundant syntax. Every `"`, `:`, and `,` consumes your context window. GLYPH eliminates the waste while remaining human-readable.
+
+### 1. Massive Token Savings
+
+**40-60% fewer tokens** than JSON on real-world data:
+
+| Data Type | JSON Tokens | GLYPH Tokens | Savings |
+|-----------|-------------|--------------|----------|
+| LLM message | 10 | 6 | **40%** |
+| Tool call | 26 | 15 | **42%** |
+| Conversation (25 msgs) | 264 | 134 | **49%** |
+| Search results (25 rows) | 456 | 220 | **52%** |
+| Tool results (50 items) | 562 | 214 | **62%** |
+
+<Warning>
+These are **token** savings (what LLMs count), not byte savings. GLYPH is optimized for tokenizer efficiency.
+</Warning>
+
+### 2. Streaming Validation
+
+Detect errors **as tokens stream**, not after generation completes:
+
+```glyph
+{tool=unknown...  ← Cancel mid-stream, save the remaining tokens
+```
+
+**Traditional approach**: Wait for 50-150 tokens → parse → discover error → wasted tokens
+
+**GLYPH approach**: Tokens stream → error detected at token 3-5 → cancel immediately
+
+<Note>
+**Real impact**: Catch bad tool names, missing params, and constraint violations as they appear. Save tokens, time, and reduce failures.
+</Note>
+
+### 3. Auto-Tabular Mode
+
+Homogeneous lists compress to tables automatically:
+
+```glyph
+@tab _ [name age city]
+Alice 28 NYC
+Bob 32 SF
+Carol 25 Austin
+@end
+```
+
+**50-62% fewer tokens** than JSON arrays. The more rows, the bigger the savings.
+
+### 4. State Fingerprinting
+
+SHA-256 hashing prevents concurrent modification conflicts:
+
+```python
+base_hash = glyph.fingerprint_loose(state)
+patch = glyph.create_patch(update, base=base_hash)
+# Server verifies base_hash before applying
+```
+
+Enables checkpoint/resume workflows and multi-agent coordination.
+
+### 5. JSON Interoperability
+
+Drop-in replacement with bidirectional conversion:
+
+```python
+import glyph
+
+# JSON to GLYPH
+data = {"action": "search", "query": "AI agents", "limit": 5}
+glyph_str = glyph.json_to_glyph(data)
+
+# GLYPH to JSON
+restored = glyph.glyph_to_json(glyph_str)
+assert restored == data  # Perfect round-trip
+```
+
+---
+
+## Token Savings Breakdown
+
+GLYPH achieves token savings through multiple techniques:
+
+<Steps>
+  <Step title="Remove Quotes on Keys">
+    `"action"` → `action` saves 2 tokens per key
+  </Step>
+  
+  <Step title="Replace Colons with Equals">
+    `:` → `=` uses fewer tokens in most tokenizers
+  </Step>
+  
+  <Step title="Remove Commas">
+    Whitespace separation instead of commas
+  </Step>
+  
+  <Step title="Bare Strings">
+    `hello` instead of `"hello"` when unambiguous
+  </Step>
+  
+  <Step title="Compact Booleans and Null">
+    `true` → `t`, `false` → `f`, `null` → `_`
+  </Step>
+  
+  <Step title="Tabular Encoding">
+    Keys appear once for entire table, not per row
+  </Step>
+</Steps>
+
+### Example: Tool Definition
+
+<CodeGroup>
+```json JSON (180 tokens)
+{
+  "name": "search",
+  "description": "Search the web",
+  "parameters": {
+    "query": {"type": "string", "required": true},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+  }
+}
+```
+
+```glyph GLYPH (98 tokens - 46% reduction)
+{name=search description="Search the web" parameters={query={type=string required=t} limit={type=integer minimum=1 maximum=100}}}
+```
+</CodeGroup>
+
+---
+
+## Key Features
+
+### Format Basics
+
+```glyph Format Quick Reference
+Null:    ∅ or _          List:    [1 2 3]
+Bool:    t / f           Map:     {a=1 b=2}
+Int:     42, -7          Struct:  Team{name=Arsenal}
+Float:   3.14, 1e-10     Sum:     Some(42) / None()
+String:  hello           Ref:     ^user:abc123
+Bytes:   b64"SGVsbG8="   Time:    2025-01-13T12:00:00Z
+```
+
+**vs JSON**: No commas · `=` not `:` · bare strings · `t`/`f` bools · `∅` null
+
+### Human Readable
+
+Unlike binary formats (Protocol Buffers, MessagePack), GLYPH remains readable:
+
+```glyph
+{user=Alice status=active score=0.95 tags=[premium beta]}
+```
+
+You can debug it. LLMs can read it. Humans can understand it.
+
+### Streaming Compatible
+
+Validate structure as it's being generated:
+
+```python
+from glyph import StreamingValidator
+
+validator = StreamingValidator(tools)
+for token in llm_stream:
+    result = validator.push(token)
+    if result.has_errors():
+        cancel_generation()
+        break
+```
+
+---
+
+## When to Use GLYPH
+
+### ✅ Use GLYPH
+
+- **LLMs reading structured data**: Tool responses, state, batch data
+- **Streaming validation needed**: Real-time error detection
+- **Token budgets are tight**: System prompts, conversation history
+- **Multi-agent systems**: State management and message passing
+- **Large datasets**: Search results, embeddings, logs
+
+### ⚠️ Use JSON
+
+- **LLMs generating output**: They're trained on JSON format
+- **Existing JSON-only integrations**: External APIs that require JSON
+- **Browser/web contexts**: Native JSON support in JavaScript
+
+### 💡 Best Practice: Hybrid Approach
+
+LLMs generate JSON (what they know) → serialize to GLYPH for storage/transmission:
+
+```python
+# LLM generates JSON
+llm_output = generate(prompt)
+parsed = json.loads(llm_output)
+
+# Store as GLYPH (40% smaller)
+glyph_text = glyph.json_to_glyph(parsed)
+save_to_db(glyph_text)
+
+# Load and send to next LLM as JSON
+loaded = load_from_db()
+as_json = glyph.glyph_to_json(loaded)
+next_llm_call(as_json)
+```
+
+---
+
+## Use Cases
+
+### Tool Calling
+
+Define tools in GLYPH (40% fewer tokens in system prompts), validate during streaming:
+
+```glyph
+Tools available:
+- search{query=str max_results=int<1,100>}
+- calculate{expression=str precision=int<0,15>}
+- get_weather{location=str units=enum[celsius,fahrenheit]}
+```
+
+Detect errors and cancel immediately—not after full generation.
+
+### Agent State
+
+Store conversation history with 49% fewer tokens:
+
+```python
+state = {
+    "conversation": [...],  # 25 messages
+    "tool_results": {...},
+    "working_memory": {...}
+}
+
+# Store efficiently
+glyph_text = glyph.json_to_glyph(state)
+# 49% smaller than JSON
+```
+
+Patch with base hashes for concurrent safety.
+
+### Batch Data
+
+Auto-tabular mode for embeddings, search results, logs:
+
+```python
+# 50 search results
+results = [{"id": f"doc_{i}", "score": ...} for i in range(50)]
+
+# JSON: 919 tokens
+# GLYPH: 439 tokens (52% reduction)
+glyph_text = glyph.json_to_glyph(results)
+```
+
+---
+
+## Performance
+
+**Codec Speed** (Go implementation):
+- Canonicalization: 2M+ ops/sec
+- Parsing: 1.5M+ ops/sec
+- Fingerprinting: 500K+ ops/sec
+
+**Overhead**: &lt;1ms for typical payloads (&lt;10KB)
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get working code in 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Install for Python, Go, JavaScript, Rust, or C
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="https://github.com/Neumenon/glyph/blob/main/docs/API_REFERENCE.md">
+    Language-specific API documentation
+  </Card>
+  
+  <Card title="Agent Patterns" icon="robot" href="https://github.com/Neumenon/glyph/blob/main/docs/AGENTS.md">
+    LLM integration recipes
+  </Card>
+</CardGroup>
+
+---
+
+## Community
+
+- **GitHub**: [github.com/Neumenon/glyph](https://github.com/Neumenon/glyph)
+- **Issues**: [Report bugs or request features](https://github.com/Neumenon/glyph/issues)
+- **Discussions**: [Ask questions](https://github.com/Neumenon/glyph/discussions)
+
+**Built by [Neumenon](https://neumenon.ai)** · Making AI agents more efficient, one token at a time.

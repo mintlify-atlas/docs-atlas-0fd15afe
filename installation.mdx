@@ -1,0 +1,727 @@
+---
+title: Installation
+description: Install GLYPH for Python, JavaScript, Go, Rust, or C. Complete setup instructions with requirements and verification steps.
+---
+
+## Overview
+
+GLYPH is available for **5 languages**: Python, JavaScript/TypeScript, Go, Rust, and C. Choose your language below for installation instructions.
+
+<Note>
+All implementations provide the same core functionality: parsing, emitting, JSON conversion, and fingerprinting.
+</Note>
+
+---
+
+## Python
+
+### Requirements
+
+- Python 3.8 or higher
+- pip (Python package manager)
+
+### Install
+
+<CodeGroup>
+```bash pip
+pip install glyph-serial
+```
+
+```bash pip (with upgrade)
+pip install --upgrade glyph-serial
+```
+
+```bash Development Mode
+# Clone the repository
+git clone https://github.com/Neumenon/glyph.git
+cd glyph/py
+
+# Install in development mode
+pip install -e .
+```
+</CodeGroup>
+
+### Verify Installation
+
+```python
+import glyph
+
+# Check version
+print(f"GLYPH version: {glyph.__version__}")
+
+# Test basic functionality
+data = {"test": "success", "active": True}
+text = glyph.json_to_glyph(data)
+print(f"GLYPH output: {text}")
+# Expected: {active=t test=success}
+
+restored = glyph.glyph_to_json(text)
+assert restored == data
+print("✓ Installation verified")
+```
+
+### Available Functions
+
+<Tabs>
+  <Tab title="Core Functions">
+    ```python
+    import glyph
+    
+    # JSON conversion
+    glyph.json_to_glyph(data)      # Python → GLYPH
+    glyph.glyph_to_json(text)      # GLYPH → Python
+    
+    # Parsing and emitting
+    glyph.parse(text)               # Parse GLYPH text
+    glyph.emit(value)               # Emit GLYPH text
+    
+    # Fingerprinting
+    glyph.fingerprint_loose(data)   # SHA-256 hash
+    glyph.equal_loose(a, b)         # Semantic equality
+    ```
+  </Tab>
+  
+  <Tab title="Value Constructors">
+    ```python
+    from glyph import g, field
+    
+    # Primitives
+    g.null()
+    g.bool(True)
+    g.int(42)
+    g.float(3.14)
+    g.str("hello")
+    
+    # Collections
+    g.list(g.int(1), g.int(2), g.int(3))
+    g.map(field("key", g.str("value")))
+    g.struct("TypeName", field("x", g.int(1)))
+    ```
+  </Tab>
+  
+  <Tab title="Streaming">
+    ```python
+    from glyph import StreamingValidator, ToolRegistry
+    
+    # Define tools
+    registry = ToolRegistry()
+    registry.register("search", args={...})
+    
+    # Validate streaming tokens
+    validator = StreamingValidator(registry)
+    for token in stream:
+        result = validator.push(token)
+        if result.has_errors():
+            break
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## JavaScript / TypeScript
+
+### Requirements
+
+- Node.js 16 or higher
+- npm or yarn
+
+### Install
+
+<CodeGroup>
+```bash npm
+npm install glyph-js
+```
+
+```bash yarn
+yarn add glyph-js
+```
+
+```bash pnpm
+pnpm add glyph-js
+```
+</CodeGroup>
+
+### Verify Installation
+
+```typescript
+import { parse, emit, fromJSON, toJSON } from 'glyph-js';
+
+// Test basic functionality
+const data = { test: 'success', active: true };
+const text = emit(fromJSON(data));
+console.log(`GLYPH output: ${text}`);
+// Expected: {active=t test=success}
+
+const value = parse(text);
+const restored = toJSON(value);
+console.log('✓ Installation verified');
+```
+
+### Available Functions
+
+<Tabs>
+  <Tab title="Core Functions">
+    ```typescript
+    import { parse, emit, fromJSON, toJSON } from 'glyph-js';
+    
+    // JSON conversion
+    const gv = fromJSON(data);      // JS → GValue
+    const obj = toJSON(gv);         // GValue → JS
+    
+    // Parsing and emitting
+    const value = parse(text);      // Parse GLYPH text
+    const text = emit(value);       // Emit GLYPH text
+    ```
+  </Tab>
+  
+  <Tab title="Value Constructors">
+    ```typescript
+    import { g, field } from 'glyph-js';
+    
+    // Primitives
+    g.null()
+    g.bool(true)
+    g.int(42)
+    g.float(3.14)
+    g.str('hello')
+    
+    // Collections
+    g.list(g.int(1), g.int(2), g.int(3))
+    g.map(field('key', g.str('value')))
+    g.struct('TypeName', field('x', g.int(1)))
+    ```
+  </Tab>
+  
+  <Tab title="Fingerprinting">
+    ```typescript
+    import { fingerprintLoose } from 'glyph-js';
+    
+    const data = { user: 'alice', count: 42 };
+    const hash = fingerprintLoose(data);
+    // sha256:a1b2c3d4...
+    ```
+  </Tab>
+</Tabs>
+
+### TypeScript Support
+
+GLYPH-JS includes full TypeScript definitions:
+
+```typescript
+import { GValue, parse } from 'glyph-js';
+
+const value: GValue = parse('{name=Alice age=30}');
+const name: string | undefined = value.get('name');
+```
+
+---
+
+## Go
+
+### Requirements
+
+- Go 1.19 or higher
+
+### Install
+
+```bash
+go get github.com/Neumenon/glyph
+```
+
+### Verify Installation
+
+Create `test.go`:
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "github.com/Neumenon/glyph/glyph"
+)
+
+func main() {
+    // Test basic functionality
+    text := `{test=success active=t}`
+    val, err := glyph.Parse([]byte(text))
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Parsed value: %v\n", val)
+    
+    // Convert to JSON
+    data, err := glyph.ToJSONLoose(val)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("JSON: %v\n", data)
+    fmt.Println("✓ Installation verified")
+}
+```
+
+Run:
+
+```bash
+go run test.go
+```
+
+### Available Functions
+
+<Tabs>
+  <Tab title="Parsing & Emitting">
+    ```go
+    import "github.com/Neumenon/glyph/glyph"
+    
+    // Parse GLYPH text
+    val, err := glyph.Parse([]byte(text))
+    
+    // Emit GLYPH text
+    text := glyph.CanonicalizeLoose(val)
+    ```
+  </Tab>
+  
+  <Tab title="JSON Conversion">
+    ```go
+    // Go data → GLYPH
+    data := map[string]interface{}{
+        "name": "Alice",
+        "age":  30,
+    }
+    v := glyph.FromJSONLoose(data)
+    text := glyph.CanonicalizeLoose(v)
+    
+    // GLYPH → Go data
+    val, _ := glyph.Parse([]byte(text))
+    data, err := glyph.ToJSONLoose(val)
+    ```
+  </Tab>
+  
+  <Tab title="Fingerprinting">
+    ```go
+    // Compute SHA-256 hash
+    hash := glyph.FingerprintLoose(val)
+    // sha256:a1b2c3d4...
+    
+    // Check equality
+    equal := glyph.EqualLoose(v1, v2)
+    ```
+  </Tab>
+  
+  <Tab title="Accessing Values">
+    ```go
+    val, _ := glyph.Parse([]byte(`{name=Alice age=30}`))
+    
+    // Access fields
+    name := val.Get("name").String()  // "Alice"
+    age := val.Get("age").Int()       // 30
+    
+    // Check types
+    if val.Get("name").IsString() {
+        fmt.Println("name is a string")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Rust
+
+### Requirements
+
+- Rust 1.70 or higher
+- Cargo (Rust package manager)
+
+### Install
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+glyph-codec = "0.1"
+```
+
+Or use cargo:
+
+```bash
+cargo add glyph-codec
+```
+
+### Verify Installation
+
+Create `src/main.rs`:
+
+```rust
+use glyph_codec::{from_json, to_json, canonicalize_loose};
+use serde_json::json;
+
+fn main() {
+    // Test basic functionality
+    let data = json!({
+        "test": "success",
+        "active": true
+    });
+    
+    let gvalue = from_json(&data);
+    let glyph = canonicalize_loose(&gvalue);
+    println!("GLYPH output: {}", glyph);
+    // Expected: {active=t test=success}
+    
+    let restored = to_json(&gvalue);
+    assert_eq!(restored, data);
+    println!("✓ Installation verified");
+}
+```
+
+Run:
+
+```bash
+cargo run
+```
+
+### Available Functions
+
+<Tabs>
+  <Tab title="JSON Conversion">
+    ```rust
+    use glyph_codec::{from_json, to_json, canonicalize_loose};
+    use serde_json::json;
+    
+    // JSON → GLYPH
+    let data = json!({"action": "search"});
+    let gvalue = from_json(&data);
+    let glyph = canonicalize_loose(&gvalue);
+    
+    // GLYPH → JSON
+    let json = to_json(&gvalue);
+    ```
+  </Tab>
+  
+  <Tab title="Parsing">
+    ```rust
+    use glyph_codec::parse;
+    
+    let gvalue = parse("{name=Alice age=30}").unwrap();
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## C
+
+### Requirements
+
+- GCC or Clang
+- Make
+- Standard C library
+
+### Install
+
+<Steps>
+  <Step title="Clone Repository">
+    ```bash
+    git clone https://github.com/Neumenon/glyph.git
+    cd glyph/c/glyph-codec
+    ```
+  </Step>
+  
+  <Step title="Build Library">
+    ```bash
+    make
+    ```
+    
+    This creates:
+    - `build/libglyph.a` (static library)
+    - `build/libglyph.so` (shared library)
+  </Step>
+  
+  <Step title="Run Tests">
+    ```bash
+    make test
+    ```
+  </Step>
+</Steps>
+
+### Verify Installation
+
+Create `test.c`:
+
+```c
+#include "glyph.h"
+#include <stdio.h>
+#include <assert.h>
+
+int main() {
+    // Test basic functionality
+    glyph_value_t *v = glyph_from_json(
+        "{\"test\": \"success\", \"active\": true}"
+    );
+    
+    char *glyph = glyph_canonicalize_loose(v);
+    printf("GLYPH output: %s\n", glyph);
+    // Expected: {active=t test=success}
+    
+    // Convert back to JSON
+    char *json = glyph_to_json(v);
+    printf("JSON: %s\n", json);
+    
+    // Cleanup
+    glyph_free(glyph);
+    glyph_free(json);
+    glyph_value_free(v);
+    
+    printf("✓ Installation verified\n");
+    return 0;
+}
+```
+
+Compile and run:
+
+```bash
+gcc -I./include test.c -L./build -lglyph -lm -o test
+./test
+```
+
+### Available Functions
+
+<Tabs>
+  <Tab title="JSON Conversion">
+    ```c
+    #include "glyph.h"
+    
+    // JSON → GLYPH
+    glyph_value_t *v = glyph_from_json(
+        "{\"action\": \"search\"}"
+    );
+    char *glyph = glyph_canonicalize_loose(v);
+    
+    // GLYPH → JSON
+    char *json = glyph_to_json(v);
+    
+    // Cleanup
+    glyph_free(glyph);
+    glyph_free(json);
+    glyph_value_free(v);
+    ```
+  </Tab>
+  
+  <Tab title="Value Construction">
+    ```c
+    // Create map
+    glyph_value_t *map = glyph_map_new();
+    glyph_map_set(map, "name", glyph_str("Alice"));
+    glyph_map_set(map, "age", glyph_int(30));
+    
+    // Emit
+    char *text = glyph_canonicalize_loose(map);
+    // {age=30 name=Alice}
+    
+    glyph_free(text);
+    glyph_value_free(map);
+    ```
+  </Tab>
+  
+  <Tab title="Parsing">
+    ```c
+    // Parse GLYPH text
+    glyph_value_t *v = glyph_parse("{name=Alice age=30}");
+    
+    // Access fields
+    glyph_value_t *name = glyph_get(v, "name");
+    const char *name_str = glyph_as_str(name);
+    
+    glyph_value_t *age = glyph_get(v, "age");
+    int64_t age_int = glyph_as_int(age);
+    
+    glyph_value_free(v);
+    ```
+  </Tab>
+  
+  <Tab title="Fingerprinting">
+    ```c
+    // Compute hash
+    char *hash = glyph_fingerprint_loose(v);
+    printf("Hash: %s\n", hash);
+    
+    glyph_free(hash);
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+**Memory Management**: Always free strings returned by GLYPH functions using `glyph_free()`, and free values using `glyph_value_free()`.
+</Warning>
+
+---
+
+## Platform Notes
+
+### Linux
+
+All implementations work out of the box on Linux.
+
+### macOS
+
+- Python, JavaScript, Go, Rust: Work natively
+- C: May need Xcode Command Line Tools:
+  ```bash
+  xcode-select --install
+  ```
+
+### Windows
+
+- Python, JavaScript: Work with standard installers
+- Go, Rust: Work with official Windows installers
+- C: Requires MinGW or Visual Studio:
+  ```bash
+  # Using MinGW
+  mingw32-make
+  ```
+
+---
+
+## Development Setup
+
+### Running Tests
+
+<Tabs>
+  <Tab title="Python">
+    ```bash
+    cd py
+    python -m pytest tests/ -v
+    ```
+  </Tab>
+  
+  <Tab title="JavaScript">
+    ```bash
+    cd js
+    npm test
+    ```
+  </Tab>
+  
+  <Tab title="Go">
+    ```bash
+    cd go
+    go test ./...
+    ```
+  </Tab>
+  
+  <Tab title="Rust">
+    ```bash
+    cd rust
+    cargo test
+    ```
+  </Tab>
+  
+  <Tab title="C">
+    ```bash
+    cd c/glyph-codec
+    make test
+    ```
+  </Tab>
+</Tabs>
+
+### Building from Source
+
+```bash
+# Clone repository
+git clone https://github.com/Neumenon/glyph.git
+cd glyph
+
+# Choose your language directory
+cd py    # or js, go, rust, c/glyph-codec
+
+# Follow language-specific build instructions
+```
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Python: ModuleNotFoundError">
+    Make sure you installed from the correct environment:
+    ```bash
+    python -m pip install glyph-serial
+    
+    # Verify
+    python -c "import glyph; print(glyph.__version__)"
+    ```
+  </Accordion>
+  
+  <Accordion title="JavaScript: Module not found">
+    Check your package.json has the dependency:
+    ```bash
+    npm list glyph-js
+    
+    # Reinstall if needed
+    npm install glyph-js
+    ```
+  </Accordion>
+  
+  <Accordion title="Go: Package not found">
+    Make sure your go.mod is set up:
+    ```bash
+    go mod init your-project
+    go get github.com/Neumenon/glyph
+    ```
+  </Accordion>
+  
+  <Accordion title="C: Compilation errors">
+    Ensure you have build tools:
+    ```bash
+    # Ubuntu/Debian
+    sudo apt-get install build-essential
+    
+    # macOS
+    xcode-select --install
+    
+    # Check GCC
+    gcc --version
+    ```
+  </Accordion>
+  
+  <Accordion title="Performance issues">
+    For optimal performance:
+    - Python: Use PyPy for 2-5x speedup
+    - JavaScript: Use Node.js 18+ with JIT optimizations
+    - Go/Rust/C: Already optimized, compile with `-O3` for C
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+Now that you have GLYPH installed:
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Get working code in 5 minutes
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="https://github.com/Neumenon/glyph/blob/main/docs/API_REFERENCE.md">
+    Complete API documentation
+  </Card>
+  
+  <Card title="Agent Patterns" icon="robot" href="https://github.com/Neumenon/glyph/blob/main/docs/AGENTS.md">
+    Tool calling and state management
+  </Card>
+  
+  <Card title="Cookbook" icon="book" href="https://github.com/Neumenon/glyph/blob/main/docs/COOKBOOK.md">
+    10 practical recipes
+  </Card>
+</CardGroup>
+
+---
+
+## Get Help
+
+- **GitHub Issues**: [Report installation problems](https://github.com/Neumenon/glyph/issues)
+- **Discussions**: [Ask questions](https://github.com/Neumenon/glyph/discussions)
+- **Documentation**: [Full guides](https://github.com/Neumenon/glyph/tree/main/docs)

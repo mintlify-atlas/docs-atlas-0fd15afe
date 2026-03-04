@@ -1,0 +1,612 @@
+---
+title: C SDK
+description: GLYPH codec for C - lightweight token-efficient serialization
+---
+
+## Installation
+
+### Build from Source
+
+```bash
+cd c/glyph-codec
+make        # Build library
+make test   # Run tests
+make install # Install system-wide (optional)
+```
+
+This produces:
+- `build/libglyph.a` - Static library
+- `build/libglyph.so` - Shared library (Linux)
+- `build/libglyph.dylib` - Shared library (macOS)
+
+### Link in Your Project
+
+```bash
+# Compile your code
+gcc -I./include your_file.c -L./build -lglyph -lm -o your_program
+
+# Run (if using shared library)
+LD_LIBRARY_PATH=./build ./your_program
+```
+
+## Quick Start
+
+```c
+#include "glyph.h"
+#include <stdio.h>
+
+int main() {
+    // JSON to GLYPH
+    glyph_value_t *v = glyph_from_json(
+        "{\"action\": \"search\", \"query\": \"weather\"}"
+    );
+    
+    char *glyph = glyph_canonicalize_loose(v);
+    printf("%s\n", glyph);  // {action=search query=weather}
+    
+    glyph_free(glyph);
+    glyph_value_free(v);
+    
+    return 0;
+}
+```
+
+## Memory Management
+
+**Critical:** GLYPH C uses manual memory management.
+
+```c
+// Constructors allocate memory
+glyph_value_t *v = glyph_str("hello");
+
+// Functions returning char* allocate strings
+char *text = glyph_canonicalize_loose(v);
+
+// Always free what you allocate
+glyph_free(text);        // Free strings
+glyph_value_free(v);     // Free values (recursive)
+```
+
+### Ownership Rules
+
+1. **Constructors allocate** - You must free
+2. **Append/Set take ownership** - Don't free the value after adding
+3. **Accessors return pointers** - Don't free returned values
+
+```c
+// ✅ Correct
+glyph_value_t *list = glyph_list_new();
+glyph_value_t *item = glyph_int(42);
+glyph_list_append(list, item);  // list takes ownership
+glyph_value_free(list);          // frees list AND item
+
+// ❌ Wrong - double free
+glyph_value_t *list = glyph_list_new();
+glyph_value_t *item = glyph_int(42);
+glyph_list_append(list, item);
+glyph_value_free(item);   // DON'T DO THIS
+glyph_value_free(list);   // double free!
+
+// ✅ Accessing values doesn't transfer ownership
+const char *s = glyph_as_str(v);
+printf("%s\n", s);  // OK, string is owned by v
+// Don't call glyph_free(s)!
+```
+
+## Value Constructors
+
+```c
+#include "glyph.h"
+
+// Scalars
+glyph_value_t *null_val = glyph_null();
+glyph_value_t *bool_val = glyph_bool(true);
+glyph_value_t *int_val = glyph_int(42);
+glyph_value_t *float_val = glyph_float(3.14);
+glyph_value_t *str_val = glyph_str("hello");  // copies string
+
+// Bytes (copies data)
+uint8_t data[] = {1, 2, 3, 4};
+glyph_value_t *bytes_val = glyph_bytes(data, sizeof(data));
+
+// Reference IDs
+glyph_value_t *id_val = glyph_id("user", "123");  // ^user:123
+
+// Containers (initially empty)
+glyph_value_t *list = glyph_list_new();
+glyph_value_t *map = glyph_map_new();
+glyph_value_t *struct_val = glyph_struct_new("Team");
+
+// Sum types (tagged union)
+glyph_value_t *result = glyph_sum("Ok", glyph_str("success"));
+```
+
+## Building Collections
+
+### Lists
+
+```c
+glyph_value_t *list = glyph_list_new();
+
+// Append items (list takes ownership)
+glyph_list_append(list, glyph_int(1));
+glyph_list_append(list, glyph_int(2));
+glyph_list_append(list, glyph_int(3));
+
+char *text = glyph_canonicalize_loose(list);
+printf("%s\n", text);  // [1 2 3]
+
+glyph_free(text);
+glyph_value_free(list);
+```
+
+### Maps
+
+```c
+glyph_value_t *map = glyph_map_new();
+
+// Set entries (map takes ownership of values, copies keys)
+glyph_map_set(map, "name", glyph_str("Alice"));
+glyph_map_set(map, "age", glyph_int(30));
+glyph_map_set(map, "active", glyph_bool(true));
+
+char *text = glyph_canonicalize_loose(map);
+printf("%s\n", text);  // {active=t age=30 name=Alice}
+
+glyph_free(text);
+glyph_value_free(map);
+```
+
+### Structs
+
+```c
+glyph_value_t *team = glyph_struct_new("Team");
+
+// Set fields (struct takes ownership of values, copies keys)
+glyph_struct_set(team, "id", glyph_id("t", "ARS"));
+glyph_struct_set(team, "name", glyph_str("Arsenal"));
+glyph_struct_set(team, "rank", glyph_int(1));
+
+char *text = glyph_canonicalize_loose(team);
+printf("%s\n", text);  // Team{id=^t:ARS name=Arsenal rank=1}
+
+glyph_free(text);
+glyph_value_free(team);
+```
+
+## Accessing Values
+
+### Type Checking
+
+```c
+glyph_value_t *v = /* ... */;
+
+glyph_type_t type = glyph_get_type(v);
+
+switch (type) {
+    case GLYPH_NULL:
+        printf("null\n");
+        break;
+    case GLYPH_BOOL:
+        printf("bool: %s\n", glyph_as_bool(v) ? "true" : "false");
+        break;
+    case GLYPH_INT:
+        printf("int: %ld\n", glyph_as_int(v));
+        break;
+    case GLYPH_FLOAT:
+        printf("float: %f\n", glyph_as_float(v));
+        break;
+    case GLYPH_STR:
+        printf("str: %s\n", glyph_as_str(v));
+        break;
+    case GLYPH_LIST:
+        printf("list with %zu items\n", glyph_list_len(v));
+        break;
+    case GLYPH_MAP:
+        printf("map\n");
+        break;
+    // ... etc
+}
+```
+
+### Extracting Scalar Values
+
+```c
+// Safe accessors (return default if wrong type)
+bool b = glyph_as_bool(v);      // false if not bool
+int64_t n = glyph_as_int(v);    // 0 if not int
+double f = glyph_as_float(v);   // 0.0 if not float
+const char *s = glyph_as_str(v); // NULL if not string
+
+// Returned pointer is owned by v - don't free it!
+if (s != NULL) {
+    printf("String: %s\n", s);
+}
+```
+
+### Lists
+
+```c
+glyph_value_t *list = /* ... */;
+
+size_t len = glyph_list_len(list);
+for (size_t i = 0; i < len; i++) {
+    glyph_value_t *item = glyph_list_get(list, i);
+    // item is owned by list - don't free it
+    printf("Item %zu: %ld\n", i, glyph_as_int(item));
+}
+```
+
+### Maps and Structs
+
+```c
+glyph_value_t *map = /* ... */;
+
+// Get value by key (returns NULL if not found)
+glyph_value_t *name = glyph_get(map, "name");
+if (name != NULL) {
+    printf("Name: %s\n", glyph_as_str(name));
+}
+
+glyph_value_t *age = glyph_get(map, "age");
+if (age != NULL && glyph_get_type(age) == GLYPH_INT) {
+    printf("Age: %ld\n", glyph_as_int(age));
+}
+```
+
+## Canonicalization
+
+### Basic Usage
+
+```c
+glyph_value_t *v = glyph_map_new();
+glyph_map_set(v, "x", glyph_int(1));
+glyph_map_set(v, "y", glyph_int(2));
+
+// Default options (auto-tabular enabled)
+char *text = glyph_canonicalize_loose(v);
+printf("%s\n", text);  // {x=1 y=2}
+
+glyph_free(text);
+glyph_value_free(v);
+```
+
+### Without Auto-Tabular
+
+```c
+// Disable auto-tabular (backward compatibility)
+char *text = glyph_canonicalize_loose_no_tabular(v);
+```
+
+### Custom Options
+
+```c
+glyph_canon_opts_t opts = glyph_canon_opts_default();
+opts.auto_tabular = true;
+opts.min_rows = 3;
+opts.max_cols = 64;
+opts.allow_missing = true;
+opts.null_style = GLYPH_NULL_UNDERSCORE;  // _ or GLYPH_NULL_SYMBOL (∅)
+
+char *text = glyph_canonicalize_loose_with_opts(v, &opts);
+```
+
+### Auto-Tabular Example
+
+```c
+// List of homogeneous maps (≥3 items) → tabular format
+const char *json = "["
+    "{\"id\":\"doc_1\",\"score\":0.95},"
+    "{\"id\":\"doc_2\",\"score\":0.89},"
+    "{\"id\":\"doc_3\",\"score\":0.84}"
+    "]";
+
+glyph_value_t *v = glyph_from_json(json);
+char *glyph = glyph_canonicalize_loose(v);
+
+printf("%s\n", glyph);
+// @tab _ rows=3 cols=2 [id score]
+// |doc_1|0.95|
+// |doc_2|0.89|
+// |doc_3|0.84|
+// @end
+
+glyph_free(glyph);
+glyph_value_free(v);
+```
+
+## JSON Bridge
+
+### Parse JSON
+
+```c
+const char *json = "{\"action\":\"search\",\"query\":\"weather\"}";
+glyph_value_t *v = glyph_from_json(json);
+
+if (v == NULL) {
+    fprintf(stderr, "JSON parse failed\n");
+    return 1;
+}
+
+// Use value...
+
+glyph_value_free(v);
+```
+
+### Emit JSON
+
+```c
+glyph_value_t *v = glyph_map_new();
+glyph_map_set(v, "status", glyph_str("ok"));
+glyph_map_set(v, "count", glyph_int(42));
+
+char *json = glyph_to_json(v);
+printf("%s\n", json);  // {"count":42,"status":"ok"}
+
+glyph_free(json);
+glyph_value_free(v);
+```
+
+## Comparison
+
+```c
+glyph_value_t *v1 = glyph_from_json("{\"x\":1,\"y\":2}");
+glyph_value_t *v2 = glyph_from_json("{\"y\":2,\"x\":1}");
+
+// Semantic equality (order-independent for maps)
+if (glyph_equal_loose(v1, v2)) {
+    printf("Equal!\n");
+}
+
+glyph_value_free(v1);
+glyph_value_free(v2);
+```
+
+## Hashing
+
+```c
+glyph_value_t *v = /* ... */;
+
+// Full fingerprint (canonical form)
+char *fp = glyph_fingerprint_loose(v);
+printf("Fingerprint: %s\n", fp);
+
+// Short hash (16 hex chars)
+char *hash = glyph_hash_loose(v);
+printf("Hash: %s\n", hash);
+
+glyph_free(fp);
+glyph_free(hash);
+glyph_value_free(v);
+```
+
+## Complete Examples
+
+### LLM Tool Call Handler
+
+```c
+#include "glyph.h"
+#include <stdio.h>
+
+void handle_tool_call(const char *glyph_input) {
+    // Parse GLYPH from LLM (30-50% fewer tokens than JSON)
+    // Note: Parser not yet implemented in C SDK
+    // For now, use JSON bridge
+    
+    glyph_value_t *args = glyph_from_json(
+        "{\"action\":\"search\",\"query\":\"weather\",\"max_results\":5}"
+    );
+    
+    const char *action = glyph_as_str(glyph_get(args, "action"));
+    const char *query = glyph_as_str(glyph_get(args, "query"));
+    int64_t max_results = glyph_as_int(glyph_get(args, "max_results"));
+    
+    printf("Action: %s\n", action);
+    printf("Query: %s\n", query);
+    printf("Max results: %ld\n", max_results);
+    
+    // Execute and return results...
+    
+    glyph_value_free(args);
+}
+
+int main() {
+    handle_tool_call("{action=search query=weather max_results=5}");
+    return 0;
+}
+```
+
+### Building Structured Data
+
+```c
+#include "glyph.h"
+#include <stdio.h>
+
+int main() {
+    // Build a list of user objects
+    glyph_value_t *users = glyph_list_new();
+    
+    // User 1
+    glyph_value_t *u1 = glyph_map_new();
+    glyph_map_set(u1, "id", glyph_str("u1"));
+    glyph_map_set(u1, "name", glyph_str("Alice"));
+    glyph_map_set(u1, "score", glyph_int(95));
+    glyph_list_append(users, u1);
+    
+    // User 2
+    glyph_value_t *u2 = glyph_map_new();
+    glyph_map_set(u2, "id", glyph_str("u2"));
+    glyph_map_set(u2, "name", glyph_str("Bob"));
+    glyph_map_set(u2, "score", glyph_int(87));
+    glyph_list_append(users, u2);
+    
+    // User 3
+    glyph_value_t *u3 = glyph_map_new();
+    glyph_map_set(u3, "id", glyph_str("u3"));
+    glyph_map_set(u3, "name", glyph_str("Carol"));
+    glyph_map_set(u3, "score", glyph_int(92));
+    glyph_list_append(users, u3);
+    
+    // Wrap in object
+    glyph_value_t *data = glyph_map_new();
+    glyph_map_set(data, "users", users);
+    
+    // Emit with auto-tabular
+    char *compact = glyph_canonicalize_loose(data);
+    printf("%s\n", compact);
+    // {users=@tab _ rows=3 cols=3 [id name score]
+    // |u1|Alice|95|
+    // |u2|Bob|87|
+    // |u3|Carol|92|
+    // @end}
+    
+    glyph_free(compact);
+    glyph_value_free(data);
+    
+    return 0;
+}
+```
+
+### Token Savings Demo
+
+```c
+#include "glyph.h"
+#include <stdio.h>
+#include <string.h>
+
+int main() {
+    const char *json = 
+        "{\"action\":\"search\","
+        "\"query\":\"weather in NYC\","
+        "\"max_results\":10}";
+    
+    glyph_value_t *v = glyph_from_json(json);
+    char *glyph = glyph_canonicalize_loose(v);
+    
+    printf("JSON:  %zu chars\n", strlen(json));
+    printf("GLYPH: %zu chars\n", strlen(glyph));
+    printf("Savings: %.1f%%\n", 
+        100.0 * (1.0 - (double)strlen(glyph) / strlen(json)));
+    
+    printf("\nJSON:\n%s\n", json);
+    printf("\nGLYPH:\n%s\n", glyph);
+    // {action=search max_results=10 query="weather in NYC"}
+    
+    glyph_free(glyph);
+    glyph_value_free(v);
+    
+    return 0;
+}
+```
+
+## API Reference Summary
+
+### Constructors
+
+```c
+glyph_value_t *glyph_null(void);
+glyph_value_t *glyph_bool(bool value);
+glyph_value_t *glyph_int(int64_t value);
+glyph_value_t *glyph_float(double value);
+glyph_value_t *glyph_str(const char *value);
+glyph_value_t *glyph_bytes(const uint8_t *data, size_t len);
+glyph_value_t *glyph_id(const char *prefix, const char *value);
+glyph_value_t *glyph_list_new(void);
+glyph_value_t *glyph_map_new(void);
+glyph_value_t *glyph_struct_new(const char *type_name);
+glyph_value_t *glyph_sum(const char *tag, glyph_value_t *value);
+```
+
+### Mutation
+
+```c
+void glyph_list_append(glyph_value_t *list, glyph_value_t *item);
+void glyph_map_set(glyph_value_t *map, const char *key, glyph_value_t *value);
+void glyph_struct_set(glyph_value_t *s, const char *key, glyph_value_t *value);
+```
+
+### Accessors
+
+```c
+glyph_type_t glyph_get_type(const glyph_value_t *v);
+bool glyph_as_bool(const glyph_value_t *v);
+int64_t glyph_as_int(const glyph_value_t *v);
+double glyph_as_float(const glyph_value_t *v);
+const char *glyph_as_str(const glyph_value_t *v);
+size_t glyph_list_len(const glyph_value_t *v);
+glyph_value_t *glyph_list_get(const glyph_value_t *v, size_t index);
+glyph_value_t *glyph_get(const glyph_value_t *v, const char *key);
+```
+
+### Canonicalization
+
+```c
+char *glyph_canonicalize_loose(const glyph_value_t *v);
+char *glyph_canonicalize_loose_no_tabular(const glyph_value_t *v);
+char *glyph_canonicalize_loose_with_opts(const glyph_value_t *v, const glyph_canon_opts_t *opts);
+char *glyph_fingerprint_loose(const glyph_value_t *v);
+char *glyph_hash_loose(const glyph_value_t *v);
+bool glyph_equal_loose(const glyph_value_t *a, const glyph_value_t *b);
+```
+
+### JSON Bridge
+
+```c
+glyph_value_t *glyph_from_json(const char *json);
+char *glyph_to_json(const glyph_value_t *v);
+```
+
+### Memory Management
+
+```c
+void glyph_value_free(glyph_value_t *v);  // Recursive
+void glyph_free(void *ptr);               // Free strings
+```
+
+## Error Handling
+
+The C SDK uses return values for error handling:
+
+```c
+// NULL indicates error
+glyph_value_t *v = glyph_from_json(invalid_json);
+if (v == NULL) {
+    fprintf(stderr, "Parse error\n");
+    return 1;
+}
+
+// Accessors return safe defaults
+int64_t n = glyph_as_int(non_int_value);  // Returns 0
+
+// Check type before accessing
+if (glyph_get_type(v) == GLYPH_INT) {
+    int64_t n = glyph_as_int(v);  // Safe
+}
+```
+
+## Performance Tips
+
+1. **Batch allocations** - Build large structures once
+2. **Reuse values** - Don't repeatedly create/destroy
+3. **Use appropriate types** - Lists for ordered data, maps for lookups
+4. **Auto-tabular** - Automatic for ≥3 homogeneous maps
+5. **Free promptly** - Avoid memory leaks in long-running processes
+
+## Common Pitfalls
+
+1. **Forgetting to free** - Use valgrind to detect leaks
+2. **Double free** - Don't free values after append/set
+3. **Use after free** - Don't use values after freeing container
+4. **String lifetime** - Don't free strings returned by accessors
+
+```c
+// ❌ Wrong
+const char *s = glyph_as_str(v);
+glyph_value_free(v);
+printf("%s\n", s);  // Use after free!
+
+// ✅ Correct
+const char *s = glyph_as_str(v);
+printf("%s\n", s);
+glyph_value_free(v);
+```

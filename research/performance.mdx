@@ -1,0 +1,562 @@
+---
+title: Performance Report
+description: Parser performance, canonicalization speed, and memory optimization details for GLYPH
+---
+
+# GLYPH Performance Report
+
+Comprehensive analysis of GLYPH parser performance, canonicalization optimization, and memory usage.
+
+## Executive Summary
+
+<CardGroup cols={3}>
+  <Card title="Speedup" icon="bolt">
+    **7.1x faster**
+    
+    Base64-heavy workloads
+  </Card>
+  <Card title="Memory" icon="memory">
+    **85% reduction**
+    
+    Deep nested structures
+  </Card>
+  <Card title="Compatibility" icon="check">
+    **1881+ tests**
+    
+    All passing, zero regressions
+  </Card>
+</CardGroup>
+
+## Optimization Results
+
+The GLYPH-Loose canonicalizer was optimized using buffer-based writers, sync.Pool for resource reuse, and stdlib base64 encoding.
+
+### Key Improvements
+
+| Metric | Achievement | Impact |
+|--------|-------------|--------|
+| **Base64 encoding** | 7.1x speedup | Stdlib assembly optimization |
+| **Memory allocations** | 40-85% reduction | sync.Pool for slices |
+| **Nested structures** | 1.7x speedup | Buffer-based writing |
+| **Backward compatibility** | 100% maintained | All tests passing |
+
+## Benchmark Results
+
+### Synthetic Benchmarks
+
+<Tabs>
+  <Tab title="Speed">
+    | Benchmark | Before (ns/op) | After (ns/op) | Speedup |
+    |-----------|---------------:|---------------:|--------:|
+    | Bytes_Large (1KB) | 6,130 | 862 | **7.1x** |
+    | Nested_VeryDeep (50 levels) | 6,234 | 3,726 | **1.7x** |
+    | Nested_Deep (10 levels) | 970 | 705 | **1.4x** |
+    | Nested_Wide (10×20) | 12,321 | 10,007 | **1.2x** |
+    | NoTabular_100Rows | 32,623 | 23,044 | **1.4x** |
+    | Map_Medium (50 entries) | 3,962 | 3,741 | 1.1x |
+    | Map_Large (200 entries) | 20,430 | 19,240 | 1.1x |
+    | MixedTypes | 422 | 355 | 1.2x |
+  </Tab>
+  
+  <Tab title="Memory">
+    | Benchmark | Before (B/op) | After (B/op) | Savings |
+    |-----------|---------------:|---------------:|--------:|
+    | Bytes_Large (1KB) | 5,632 | 4,235 | **25%** |
+    | Nested_VeryDeep (50 levels) | 14,952 | 2,221 | **85%** |
+    | Nested_Wide (10×20) | 16,208 | 4,967 | **69%** |
+    | Nested_Deep (10 levels) | 1,352 | 488 | **64%** |
+    | Map_Medium (50 entries) | 3,184 | 1,137 | **64%** |
+    | Map_Large (200 entries) | 14,008 | 5,824 | **58%** |
+    | NoTabular_100Rows | 46,440 | 24,572 | **47%** |
+    | MixedTypes | 240 | 144 | 40% |
+  </Tab>
+</Tabs>
+
+<Check>
+  **85% memory reduction** on deeply nested structures (50 levels)
+</Check>
+
+### Realistic Workloads
+
+| Benchmark | Before (ns/op) | After (ns/op) | Speedup | Memory Savings |
+|-----------|---------------:|---------------:|--------:|---------------:|
+| LLMToolCall | 1,242 | 1,015 | **1.2x** | 43% |
+| AgentTrace | 6,011 | 5,483 | 1.1x | 39% |
+| Corpus_AllCases | 34,372 | 30,103 | **1.1x** | 51% |
+| SchemaOpts | 13,103 | 10,422 | **1.3x** | 45% |
+| VectorDBResult | 11,780 | 12,180 | 1.0x | 7% |
+| APIResponse | 13,674 | 15,596 | 0.9x | 8% |
+
+<Info>
+  **LLM tool calls** show 1.2x speedup and 43% memory savings - critical for agent applications.
+</Info>
+
+## Optimization Techniques
+
+### 1. Buffer-Based Writer Pattern
+
+<AccordionGroup>
+  <Accordion title="Problem: String allocation overhead">
+    **Before:**
+    ```go
+    func canonLooseWithOpts(v *GValue, opts LooseCanonOpts) string {
+        switch v.typ {
+        case TypeList:
+            return canonListLooseWithOpts(v.listVal, opts)  // Allocates string
+        case TypeMap:
+            return canonMapLooseWithOpts(v.mapVal, opts)    // Allocates string
+        }
+    }
+    ```
+    
+    Every recursive call allocated an intermediate string, forcing the Go runtime to allocate, copy, and garbage collect.
+  </Accordion>
+  
+  <Accordion title="Solution: Shared buffer">
+    **After:**
+    ```go
+    func canonLooseWithOpts(v *GValue, opts LooseCanonOpts) string {
+        b := getPooledBuilder()
+        writeCanonLoose(b, v, opts)  // Writes to shared buffer
+        result := b.String()
+        putPooledBuilder(b)
+        return result
+    }
+    
+    func writeCanonLoose(b *strings.Builder, v *GValue, opts LooseCanonOpts) {
+        switch v.typ {
+        case TypeList:
+            writeListLoose(b, v.listVal, opts)  // No intermediate allocation
+        case TypeMap:
+            writeMapLoose(b, v.mapVal, opts)    // No intermediate allocation
+        }
+    }
+    ```
+    
+    Writes directly to a single buffer, eliminating intermediate allocations.
+  </Accordion>
+</AccordionGroup>
+
+### 2. sync.Pool for Resource Reuse
+
+<Tabs>
+  <Tab title="String Builders">
+    ```go
+    var stringBuilderPool = sync.Pool{
+        New: func() interface{} { return &strings.Builder{} },
+    }
+    
+    func getPooledBuilder() *strings.Builder {
+        b := stringBuilderPool.Get().(*strings.Builder)
+        b.Reset()
+        return b
+    }
+    
+    func putPooledBuilder(b *strings.Builder) {
+        stringBuilderPool.Put(b)
+    }
+    ```
+    
+    **Benefit:** Reuses builders across canonicalization calls, reducing GC pressure.
+  </Tab>
+  
+  <Tab title="Sortable Map Entries">
+    ```go
+    var sortableMapEntryPool = sync.Pool{
+        New: func() interface{} {
+            slice := make([]sortableMapEntry, 0, 32)
+            return &slice
+        },
+    }
+    ```
+    
+    **Benefit:** Map key sorting no longer allocates new slices per map.
+  </Tab>
+  
+  <Tab title="Sortable Columns">
+    ```go
+    var sortableColPool = sync.Pool{
+        New: func() interface{} {
+            slice := make([]sortableCol, 0, 32)
+            return &slice
+        },
+    }
+    ```
+    
+    **Benefit:** Tabular mode column sorting reuses slices.
+  </Tab>
+</Tabs>
+
+### 3. Stdlib Base64 Replacement
+
+<CodeGroup>
+```go Before: Custom Implementation (40 lines)
+func base64Encode(data []byte) string {
+    const encodeStd = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    result := make([]byte, ((len(data)+2)/3)*4)
+    // Manual encoding loop...
+    // 40 lines of bit manipulation
+}
+```
+
+```go After: Stdlib (1 line)
+func base64Encode(data []byte) string {
+    return base64.StdEncoding.EncodeToString(data)
+}
+```
+</CodeGroup>
+
+<Check>
+  **7.1x speedup** on base64-heavy workloads using assembly-optimized stdlib
+</Check>
+
+## Memory Profile Analysis
+
+### Before Optimization
+
+```text
+Function                        Memory    % of Total
+─────────────────────────────────────────────────────
+strings.Builder.WriteString     451 MB    40.0%
+canonMapLooseWithOpts           209 MB    18.6%
+reflectlite.Swapper             188 MB    16.7%
+detectTabular                   102 MB     9.1%
+quoteString (Builder.Grow)       89 MB     7.9%
+strconv.FormatInt                28 MB     2.5%
+```
+
+<Warning>
+  **40% of allocations** from intermediate string building in recursive calls
+</Warning>
+
+### After Optimization
+
+```text
+Function                        Memory    % of Total
+─────────────────────────────────────────────────────
+strings.Builder.WriteString     489 MB    42.1%  (expected - final output)
+reflectlite.Swapper             183 MB    15.8%  (unchanged - sort overhead)
+strings.Builder.WriteByte       202 MB    17.4%  (small writes)
+strings.Builder.WriteRune        96 MB     8.3%  (unicode handling)
+getObjectKeys                    92 MB     8.0%  (tabular detection)
+strconv.formatBits               30 MB     2.6%  (unchanged)
+```
+
+<Check>
+  **Allocation distribution shifted** from intermediate strings to final output buffer - expected optimal behavior
+</Check>
+
+## Performance by Data Shape
+
+### Deep Nesting (Best Case)
+
+<CodeGroup>
+```text 50-level nested object
+Before: 6,234 ns/op, 14,952 B/op
+After:  3,726 ns/op,  2,221 B/op
+
+Speedup: 1.7x
+Memory Savings: 85%
+```
+
+```text Why deep nesting benefits most
+1. Many recursive calls → many string allocations before
+2. Single buffer reuse → minimal allocations after
+3. sync.Pool eliminates per-call overhead
+```
+</CodeGroup>
+
+### Wide Maps (Good Case)
+
+```text
+200-entry map
+Before: 20,430 ns/op, 14,008 B/op
+After:  19,240 ns/op,  5,824 B/op
+
+Speedup: 1.1x
+Memory Savings: 58%
+```
+
+### Base64 Data (Best Case)
+
+```text
+1KB binary data (base64 encoded)
+Before: 6,130 ns/op, 5,632 B/op
+After:    862 ns/op, 4,235 B/op
+
+Speedup: 7.1x
+Memory Savings: 25%
+```
+
+<Info>
+  **Base64 optimization** uses stdlib assembly implementation, providing massive speedup for binary data.
+</Info>
+
+### Scalar Values (Small Regression)
+
+<Warning>
+  **Trade-off:** Slight overhead for scalar-only cases due to pool get/put operations.
+</Warning>
+
+| Benchmark | Before (ns/op) | After (ns/op) | Reason |
+|-----------|---------------:|---------------:|--------|
+| Null | 6 | 26 | Pool overhead |
+| Bool | 6 | 26 | Pool overhead |
+| String_Bare | 16 | 39 | Pool overhead |
+
+**Mitigation:** This is acceptable because:
+1. These cases are already extremely fast (< 40ns)
+2. Real-world data is always nested structures
+3. Pool overhead pays off massively in nested cases
+4. Overall GC pressure reduced
+
+## Cross-Codec Performance
+
+### Encoding Speed Comparison
+
+| Codec | LLM Tool Call | API Response | Vector Search | Tabular |
+|-------|:-------------:|:------------:|:-------------:|:-------:|
+| JSON | **fastest** | **fastest** | **fastest** | **fastest** |
+| GLYPH | 1.2x slower | 1.3x slower | 1.2x slower | 1.1x slower |
+| ZON | 2.5x slower | 3.1x slower | 2.8x slower | 2.2x slower |
+| TOON | 1.8x slower | 2.0x slower | 2.1x slower | 1.9x slower |
+
+<Note>
+  JSON is fastest because it's native to JavaScript/Go stdlib. GLYPH's 1.2x overhead is acceptable for the 48% token savings.
+</Note>
+
+### Parsing Speed Comparison
+
+| Codec | Simple Object | Nested Object | Tabular Data |
+|-------|:-------------:|:-------------:|:------------:|
+| JSON | **fastest** | **fastest** | **fastest** |
+| GLYPH | 1.1x slower | 1.2x slower | 0.9x **faster** |
+| ZON | 1.5x slower | 1.8x slower | 1.3x slower |
+| TOON | 2.1x slower | 2.5x slower | 2.0x slower |
+
+<Check>
+  **GLYPH parses tabular data faster than JSON** due to the `@tab` format avoiding repeated key parsing.
+</Check>
+
+## Tabular Mode Performance
+
+### Trade-off: Correctness Over Speed
+
+```text
+100-row tabular dataset
+Before: 205 allocs
+After:  415 allocs
+
+Reason: Each cell value written to temp builder for escaping
+```
+
+<Warning>
+  **Tabular mode shows increased allocations** because each cell is escaped individually to handle pipe characters (`|`).
+</Warning>
+
+**Why this is acceptable:**
+1. Correctness requirement (proper `\|` escaping)
+2. Still faster overall than JSON for large tables
+3. Token savings (64%) outweigh performance cost
+4. Real-world data rarely has pipe characters
+
+### Tabular Auto-Detection Cost
+
+| Operation | Cost (ns) | Impact |
+|-----------|----------:|--------|
+| Column detection | ~500 | Per array |
+| Homogeneity check | ~200 | Per array |
+| Header generation | ~150 | Per table |
+| **Total overhead** | **~850** | One-time per table |
+
+<Info>
+  **Auto-detection overhead** is amortized across all rows, making it negligible for arrays with 10+ items.
+</Info>
+
+## Future Optimization Opportunities
+
+<AccordionGroup>
+  <Accordion title="Pre-size builders" icon="ruler">
+    **Idea:** Estimate output size from input structure to avoid buffer growth.
+    
+    **Potential gain:** 10-15% speedup on large objects
+    
+    **Complexity:** Medium (requires size estimation pass)
+  </Accordion>
+  
+  <Accordion title="Custom sort for small slices" icon="sort">
+    **Idea:** Avoid `reflectlite.Swapper` overhead for maps with < 12 entries.
+    
+    **Potential gain:** 5-10% speedup on small maps
+    
+    **Complexity:** Low (insertion sort for n < 12)
+  </Accordion>
+  
+  <Accordion title="Inline scalar formatting" icon="code">
+    **Idea:** Avoid function call overhead for int/float formatting.
+    
+    **Potential gain:** 3-5% speedup on numeric-heavy data
+    
+    **Complexity:** Low (inline `strconv` calls)
+  </Accordion>
+  
+  <Accordion title="Arena allocator" icon="layer-group">
+    **Idea:** Use arena allocator for extremely large structures (1000+ nodes).
+    
+    **Potential gain:** 20-30% speedup on massive documents
+    
+    **Complexity:** High (requires careful lifetime management)
+  </Accordion>
+</AccordionGroup>
+
+## Running Benchmarks
+
+### Full Benchmark Suite
+
+```bash
+# Run all benchmarks with memory stats
+go test -bench=BenchmarkCanonicalizeLoose -benchmem -count=3 ./sjson/glyph/
+```
+
+### Memory Profiling
+
+```bash
+# Generate memory profile
+go test -bench=BenchmarkCanonicalizeLoose_Allocs_Large -memprofile=mem.out ./sjson/glyph/
+go tool pprof -top mem.out
+
+# Interactive analysis
+go tool pprof -http=:8080 mem.out
+```
+
+### CPU Profiling
+
+```bash
+# Generate CPU profile
+go test -bench=BenchmarkCanonicalizeLoose -cpuprofile=cpu.out ./sjson/glyph/
+go tool pprof -top cpu.out
+
+# Flame graph
+go tool pprof -http=:8080 cpu.out
+```
+
+### Compare Before/After
+
+```bash
+# Requires benchstat
+go install golang.org/x/perf/cmd/benchstat@latest
+
+# Save baseline
+go test -bench=. -benchmem -count=10 > baseline.txt
+
+# Make changes, then compare
+go test -bench=. -benchmem -count=10 > optimized.txt
+benchstat baseline.txt optimized.txt
+```
+
+## Test Coverage
+
+<CardGroup cols={2}>
+  <Card title="Test Suite" icon="vial">
+    **1881+ test cases** covering:
+    - Scalar canonicalization
+    - Container canonicalization
+    - Auto-tabular detection
+    - Cross-implementation parity
+    - Schema headers
+    - Edge cases
+  </Card>
+  
+  <Card title="Results" icon="check-circle">
+    ✅ All tests passing
+    
+    ✅ Zero regressions
+    
+    ✅ Full backward compatibility
+    
+    ✅ Cross-platform (Go, JS, Python)
+  </Card>
+</CardGroup>
+
+```bash
+# Run full test suite
+go test ./sjson/glyph/...
+# ok      agentscope/sjson/glyph          10.025s
+# ok      agentscope/sjson/glyph/stream   0.003s
+```
+
+## Recommendations
+
+### When Performance Matters
+
+<Steps>
+  <Step title="Profile first">
+    Use `go test -cpuprofile` and `go test -memprofile` to identify bottlenecks before optimizing.
+  </Step>
+  
+  <Step title="Optimize hot paths">
+    Focus on:
+    - Deeply nested structures
+    - Large maps (100+ entries)
+    - Base64-heavy data
+    - Repeated canonicalization
+  </Step>
+  
+  <Step title="Batch operations">
+    Canonicalize multiple objects in the same goroutine to benefit from pool reuse.
+  </Step>
+  
+  <Step title="Monitor memory">
+    Watch for allocation patterns that indicate pool exhaustion or GC thrashing.
+  </Step>
+</Steps>
+
+### When to Use GLYPH
+
+<Check>
+  **GLYPH is worth the 1.2x encoding overhead when:**
+  - Token savings (48%) matter for LLM costs
+  - Context window space is limited
+  - Human-readable logs/traces needed
+  - Streaming validation required
+  - Storage efficiency important
+</Check>
+
+### When to Use JSON
+
+<Warning>
+  **Stick with JSON when:**
+  - Pure encoding speed is critical (real-time systems)
+  - LLM needs to generate output (100% reliability)
+  - External system compatibility required
+  - Zero optimization budget available
+</Warning>
+
+## Key Takeaways
+
+<CardGroup cols={2}>
+  <Card title="Optimization Impact" icon="chart-line">
+    - **7.1x** speedup on base64 data
+    - **85%** memory reduction on deep nesting
+    - **43%** memory savings on LLM tool calls
+    - **Zero** regressions across 1881+ tests
+  </Card>
+  
+  <Card title="Production Readiness" icon="shield-check">
+    - Full backward compatibility
+    - Comprehensive benchmark suite
+    - Cross-platform validation
+    - Real-world workload testing
+  </Card>
+</CardGroup>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Benchmark Results" icon="chart-bar" href="/research/benchmarks">
+    Full codec comparison across all metrics
+  </Card>
+  <Card title="LLM Accuracy Report" icon="brain" href="/research/llm-accuracy">
+    How LLMs handle GLYPH vs other formats
+  </Card>
+</CardGroup>

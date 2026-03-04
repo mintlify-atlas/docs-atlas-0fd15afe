@@ -1,97 +1,239 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: GLYPH Documentation
+description: Token-efficient serialization for AI agents
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#6366f1] via-[#4f46e5] to-[#4338ca] dark:from-[#4f46e5] dark:via-[#4338ca] dark:to-[#3730a3] py-20">
+  <div className="max-w-6xl mx-auto px-6 lg:px-8">
+    <div className="text-center">
+      <h1 className="text-5xl md:text-6xl font-bold text-white mb-6">
+        GLYPH
+      </h1>
+      <p className="text-xl md:text-2xl text-white/90 max-w-3xl mx-auto mb-8">
+        Token-efficient serialization for AI agents. 50%+ fewer tokens, streaming validation, human-readable.
+      </p>
+      <div className="flex flex-wrap gap-4 justify-center">
+        <a 
+          href="/quickstart" 
+          className="inline-flex items-center px-6 py-3 bg-white text-[#6366f1] font-semibold rounded-lg hover:bg-gray-100 transition-colors no-underline"
+        >
+          Get Started
+        </a>
+        <a 
+          href="/introduction" 
+          className="inline-flex items-center px-6 py-3 border border-white/30 bg-white/10 text-white font-semibold rounded-lg hover:bg-white/20 transition-colors no-underline"
+        >
+          Learn More
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+      Why GLYPH?
+    </h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+      JSON wastes tokens on redundant syntax. Every quote, colon, and comma consumes context window. GLYPH eliminates the waste.
+    </p>
+  </div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-16">
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-4xl mb-3">⚡</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">40-60% Token Savings</h3>
+      <p className="text-gray-600 dark:text-gray-400">
+        No quotes, no colons, no commas, abbreviated keys. More context window for your agents.
+      </p>
+    </div>
+    
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-4xl mb-3">🔄</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Streaming Validation</h3>
+      <p className="text-gray-600 dark:text-gray-400">
+        Detect errors mid-stream, cancel immediately. Save tokens, money, and reduce latency.
+      </p>
+    </div>
+    
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-4xl mb-3">📊</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Auto-Tabular Mode</h3>
+      <p className="text-gray-600 dark:text-gray-400">
+        Homogeneous lists compress to tables automatically. 50-62% fewer tokens that scale linearly.
+      </p>
+    </div>
+    
+    <div className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27]">
+      <div className="text-4xl mb-3">🌐</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">JSON Interoperability</h3>
+      <p className="text-gray-600 dark:text-gray-400">
+        Drop-in replacement with bidirectional conversion. One-line change to your code.
+      </p>
+    </div>
+  </div>
 
-## Make it yours
+  <div className="mb-16">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+      Quick comparison
+    </h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400 mb-6">
+      See the difference for yourself
+    </p>
+    
+    <div className="space-y-4">
+      <div>
+        <div className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">JSON (30 tokens)</div>
+        <pre className="p-4 bg-gray-50 dark:bg-[#1a1d27] rounded-lg overflow-x-auto border border-gray-200 dark:border-[#27272a]">
+          <code className="text-sm text-gray-800 dark:text-gray-200">
+{`{"messages":[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello!"}],"model":"gpt-4"}`}
+          </code>
+        </pre>
+      </div>
+      
+      <div>
+        <div className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">GLYPH (16 tokens - 47% reduction)</div>
+        <pre className="p-4 bg-gray-50 dark:bg-[#1a1d27] rounded-lg overflow-x-auto border border-gray-200 dark:border-[#27272a]">
+          <code className="text-sm text-gray-800 dark:text-gray-200">
+{`{msgs:[{r:u c:Hi} {r:a c:Hello!}] mdl:gpt-4}`}
+          </code>
+        </pre>
+      </div>
+    </div>
+  </div>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6 text-center">
+    Get started
+  </h2>
+  
+  <Steps>
+    <Step title="Install GLYPH">
+      Choose your language and install the package.
+      
+      <CodeGroup>
+        ```bash Python
+        pip install glyph-serial
+        ```
+        
+        ```bash JavaScript
+        npm install glyph-js
+        ```
+        
+        ```bash Go
+        go get github.com/Neumenon/glyph
+        ```
+        
+        ```bash Rust
+        cargo add glyph-codec
+        ```
+      </CodeGroup>
+    </Step>
+    
+    <Step title="Convert JSON to GLYPH">
+      Use the simple conversion API to start saving tokens immediately.
+      
+      ```python
+      import glyph
+      
+      data = {"action": "search", "query": "AI agents", "limit": 5}
+      glyph_str = glyph.json_to_glyph(data)
+      # Result: {action=search limit=5 query="AI agents"}
+      ```
+    </Step>
+    
+    <Step title="Parse and use GLYPH">
+      Parse GLYPH text and access values directly.
+      
+      ```python
+      result = glyph.parse('{name=Alice age=30}')
+      print(result.get("name").as_str())  # Alice
+      print(result.get("age").as_int())   # 30
+      ```
+    </Step>
+  </Steps>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6 text-center">
+    Explore by topic
+  </h2>
+  
+  <CardGroup cols={2}>
+    <Card title="Quickstart" icon="rocket" href="/quickstart">
+      Get up and running in 5 minutes with working code examples
+    </Card>
+    <Card title="AI Agent Patterns" icon="robot" href="/guides/ai-agents">
+      Tool calling, state management, and multi-agent coordination
+    </Card>
+    <Card title="Python SDK" icon="python" href="/sdks/python">
+      Complete Python API reference with examples
+    </Card>
+    <Card title="JavaScript SDK" icon="js" href="/sdks/javascript">
+      TypeScript-first SDK with full type definitions
+    </Card>
+    <Card title="Token Savings" icon="chart-line" href="/concepts/token-savings">
+      Understand how GLYPH reduces token usage by 40-60%
+    </Card>
+    <Card title="Streaming Validation" icon="bolt" href="/concepts/streaming-validation">
+      Cancel bad requests before generation completes
+    </Card>
+  </CardGroup>
+</div>
 
-## Create beautiful pages
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6 text-center">
+    Language support
+  </h2>
+  <p className="text-lg text-gray-600 dark:text-gray-400 text-center mb-8">
+    GLYPH is available in multiple languages with consistent APIs
+  </p>
+  
+  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <a href="/sdks/python" className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] hover:border-[#6366f1] dark:hover:border-[#6366f1] transition-colors text-center no-underline group">
+      <div className="text-3xl mb-2">🐍</div>
+      <div className="text-sm font-semibold text-gray-900 dark:text-white">Python</div>
+    </a>
+    
+    <a href="/sdks/javascript" className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] hover:border-[#6366f1] dark:hover:border-[#6366f1] transition-colors text-center no-underline group">
+      <div className="text-3xl mb-2">📜</div>
+      <div className="text-sm font-semibold text-gray-900 dark:text-white">JavaScript</div>
+    </a>
+    
+    <a href="/sdks/go" className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] hover:border-[#6366f1] dark:hover:border-[#6366f1] transition-colors text-center no-underline group">
+      <div className="text-3xl mb-2">🔷</div>
+      <div className="text-sm font-semibold text-gray-900 dark:text-white">Go</div>
+    </a>
+    
+    <a href="/sdks/rust" className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] hover:border-[#6366f1] dark:hover:border-[#6366f1] transition-colors text-center no-underline group">
+      <div className="text-3xl mb-2">🦀</div>
+      <div className="text-sm font-semibold text-gray-900 dark:text-white">Rust</div>
+    </a>
+    
+    <a href="/sdks/c" className="p-6 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] hover:border-[#6366f1] dark:hover:border-[#6366f1] transition-colors text-center no-underline group">
+      <div className="text-3xl mb-2">⚙️</div>
+      <div className="text-sm font-semibold text-gray-900 dark:text-white">C</div>
+    </a>
+  </div>
+</div>
 
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="p-8 rounded-lg bg-gradient-to-r from-[#6366f1] to-[#4f46e5] dark:from-[#4f46e5] dark:to-[#4338ca]">
+    <div className="text-center">
+      <h2 className="text-3xl font-bold text-white mb-4">
+        Ready to optimize your AI agents?
+      </h2>
+      <p className="text-lg text-white/90 mb-6 max-w-2xl mx-auto">
+        Start saving tokens, reducing costs, and improving your agent's performance today.
+      </p>
+      <a 
+        href="/quickstart" 
+        className="inline-flex items-center px-6 py-3 bg-white text-[#6366f1] font-semibold rounded-lg hover:bg-gray-100 transition-colors no-underline"
+      >
+        Get Started →
+      </a>
+    </div>
+  </div>
+</div>

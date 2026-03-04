@@ -1,0 +1,656 @@
+---
+title: "Patches"
+description: "Incremental state updates with base hash verification and concurrent safety"
+---
+
+## Overview
+
+**GLYPH patches** enable efficient incremental updates to structured state. Instead of sending the entire state document after each change, send only the operations that transform one state to another.
+
+### Why Patches?
+
+<CardGroup cols={2}>
+  <Card title="Token Efficiency" icon="coins">
+    Send O(1) operations instead of O(n) full state
+  </Card>
+  <Card title="Base Hash Verification" icon="shield-check">
+    Cryptographic proof you're updating the correct version
+  </Card>
+  <Card title="Optimistic Concurrency" icon="clock">
+    Detect and reject conflicting updates
+  </Card>
+  <Card title="Audit Trail" icon="list">
+    Log operations for debugging and replay
+  </Card>
+</CardGroup>
+
+## Patch Operations
+
+GLYPH supports four core patch operations:
+
+| Operator | Name | Purpose | Example |
+|----------|------|---------|----------|
+| `=` | Set | Replace a value | `= score 95` |
+| `+` | Append | Add to list/map | `+ items {id=3 name=widget}` |
+| `~` | Increment | Add to number | `~ count 1` |
+| `-` | Delete | Remove key/index | `- items[0]` |
+
+### Set Operation (`=`)
+
+Replace a field value completely.
+
+```glyph
+# Before
+{score=90 status=pending}
+
+# Patch
+= score 95
+= status=complete
+
+# After
+{score=95 status=complete}
+```
+
+<CodeGroup>
+```python Python
+import glyph
+
+# Create patch
+patch = glyph.patch([
+    ("=", "score", 95),
+    ("=", "status", "complete"),
+])
+
+# Apply to state
+state = {"score": 90, "status": "pending"}
+new_state = glyph.apply_patch(state, patch)
+# {"score": 95, "status": "complete"}
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Create patch
+patch := glyph.NewPatchBuilder(target).
+    Set("score", glyph.Int(95)).
+    Set("status", glyph.Str("complete")).
+    Build()
+
+// Apply to state
+state := map[string]interface{}{
+    "score": 90,
+    "status": "pending",
+}
+newState, err := glyph.ApplyPatch(state, patch)
+// map[string]interface{}{"score": 95, "status": "complete"}
+```
+
+```typescript TypeScript
+import { patch, applyPatch } from 'glyph-js';
+
+// Create patch
+const p = patch([
+  ['=', 'score', 95],
+  ['=', 'status', 'complete'],
+]);
+
+// Apply to state
+const state = {score: 90, status: 'pending'};
+const newState = applyPatch(state, p);
+// {score: 95, status: 'complete'}
+```
+</CodeGroup>
+
+### Append Operation (`+`)
+
+Add an element to a list or a key-value pair to a map.
+
+```glyph
+# Before
+{items=[{id=1 name=foo} {id=2 name=bar}]}
+
+# Patch
++ items {id=3 name=baz}
+
+# After
+{items=[{id=1 name=foo} {id=2 name=bar} {id=3 name=baz}]}
+```
+
+<CodeGroup>
+```python Python
+import glyph
+
+# Append to list
+patch = glyph.patch([
+    ("+", "items", {"id": 3, "name": "baz"}),
+])
+
+state = {"items": [{"id": 1, "name": "foo"}, {"id": 2, "name": "bar"}]}
+new_state = glyph.apply_patch(state, patch)
+# {"items": [{"id": 1, "name": "foo"}, {"id": 2, "name": "bar"}, {"id": 3, "name": "baz"}]}
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Append to list
+patch := glyph.NewPatchBuilder(target).
+    Append("items", glyph.Map(
+        glyph.MapEntry{Key: "id", Value: glyph.Int(3)},
+        glyph.MapEntry{Key: "name", Value: glyph.Str("baz")},
+    )).
+    Build()
+
+state := map[string]interface{}{
+    "items": []map[string]interface{}{
+        {"id": 1, "name": "foo"},
+        {"id": 2, "name": "bar"},
+    },
+}
+newState, err := glyph.ApplyPatch(state, patch)
+```
+
+```typescript TypeScript
+import { patch, applyPatch } from 'glyph-js';
+
+// Append to list
+const p = patch([
+  ['+', 'items', {id: 3, name: 'baz'}],
+]);
+
+const state = {
+  items: [{id: 1, name: 'foo'}, {id: 2, name: 'bar'}]
+};
+const newState = applyPatch(state, p);
+// {items: [{id: 1, name: 'foo'}, {id: 2, name: 'bar'}, {id: 3, name: 'baz'}]}
+```
+</CodeGroup>
+
+### Increment Operation (`~`)
+
+Add a numeric value to an existing number (supports negative increments).
+
+```glyph
+# Before
+{count=5 score=100}
+
+# Patch
+~ count 1
+~ score -10
+
+# After
+{count=6 score=90}
+```
+
+<CodeGroup>
+```python Python
+import glyph
+
+# Increment counters
+patch = glyph.patch([
+    ("~", "count", 1),
+    ("~", "score", -10),
+])
+
+state = {"count": 5, "score": 100}
+new_state = glyph.apply_patch(state, patch)
+# {"count": 6, "score": 90}
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Increment counters
+patch := glyph.NewPatchBuilder(target).
+    Increment("count", glyph.Int(1)).
+    Increment("score", glyph.Int(-10)).
+    Build()
+
+state := map[string]interface{}{
+    "count": 5,
+    "score": 100,
+}
+newState, err := glyph.ApplyPatch(state, patch)
+// map[string]interface{}{"count": 6, "score": 90}
+```
+
+```typescript TypeScript
+import { patch, applyPatch } from 'glyph-js';
+
+// Increment counters
+const p = patch([
+  ['~', 'count', 1],
+  ['~', 'score', -10],
+]);
+
+const state = {count: 5, score: 100};
+const newState = applyPatch(state, p);
+// {count: 6, score: 90}
+```
+</CodeGroup>
+
+### Delete Operation (`-`)
+
+Remove a key from a map or an index from a list.
+
+```glyph
+# Before
+{temp_data=xyz count=5 items=[a b c]}
+
+# Patch
+- temp_data
+- items[1]
+
+# After
+{count=5 items=[a c]}
+```
+
+<CodeGroup>
+```python Python
+import glyph
+
+# Delete fields
+patch = glyph.patch([
+    ("-", "temp_data", None),
+    ("-", "items[1]", None),
+])
+
+state = {"temp_data": "xyz", "count": 5, "items": ["a", "b", "c"]}
+new_state = glyph.apply_patch(state, patch)
+# {"count": 5, "items": ["a", "c"]}
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Delete fields
+patch := glyph.NewPatchBuilder(target).
+    Delete("temp_data").
+    Delete("items[1]").
+    Build()
+
+state := map[string]interface{}{
+    "temp_data": "xyz",
+    "count":     5,
+    "items":     []string{"a", "b", "c"},
+}
+newState, err := glyph.ApplyPatch(state, patch)
+// map[string]interface{}{"count": 5, "items": ["a", "c"]}
+```
+
+```typescript TypeScript
+import { patch, applyPatch } from 'glyph-js';
+
+// Delete fields
+const p = patch([
+  ['-', 'temp_data'],
+  ['-', 'items[1]'],
+]);
+
+const state = {temp_data: 'xyz', count: 5, items: ['a', 'b', 'c']};
+const newState = applyPatch(state, p);
+// {count: 5, items: ['a', 'c']}
+```
+</CodeGroup>
+
+## Base Hash Verification
+
+Patches include a **base fingerprint** - the first 16 characters of the SHA-256 hash of the canonical form of the base state. This enables:
+
+- **Optimistic concurrency**: Reject patches applied to stale state
+- **Streaming validation**: Verify state consistency without full doc transfer
+- **Debugging**: Trace state divergence in distributed systems
+
+### Patch Format with Base
+
+```glyph
+@patch @base=1a2b3c4d5e6f7890
+= score 95
++ events "Goal!"
+@end
+```
+
+The `@base=` attribute contains the first 16 hex characters of `sha256(canonicalize(baseState))`.
+
+### Creating Patches with Base
+
+<CodeGroup>
+```python Python
+import glyph
+
+# Base state
+base_state = {"score": 90, "events": []}
+
+# Create patch with base fingerprint
+patch = glyph.PatchBuilder(target) \
+    .with_base_value(base_state) \
+    .set("score", 95) \
+    .append("events", "Goal!") \
+    .build()
+
+# Patch includes: @base=1a2b3c4d5e6f7890
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Base state
+baseState := map[string]interface{}{
+    "score":  90,
+    "events": []string{},
+}
+
+// Create patch with base fingerprint
+patch := glyph.NewPatchBuilder(target).
+    WithBaseValue(baseState).  // Computes SHA-256, uses first 16 hex chars
+    Set("score", glyph.Int(95)).
+    Append("events", glyph.Str("Goal!")).
+    Build()
+
+// Or with explicit fingerprint
+patch := glyph.NewPatchBuilder(target).
+    WithBaseFingerprint("1a2b3c4d5e6f7890").
+    Set("score", glyph.Int(95)).
+    Build()
+```
+
+```typescript TypeScript
+import { PatchBuilder, g } from 'glyph-js';
+
+// Base state
+const baseState = {score: 90, events: []};
+
+// Create patch with base fingerprint
+const patch = new PatchBuilder(target)
+    .withBaseValue(baseState)
+    .set('score', g.int(95))
+    .append('events', g.str('Goal!'))
+    .build();
+
+// Patch includes: @base=1a2b3c4d5e6f7890
+```
+</CodeGroup>
+
+### Applying Patches with Base Verification
+
+<CodeGroup>
+```python Python
+import glyph
+from glyph import stream
+
+# Receiver verifies base hash before applying
+@handler.on_patch
+def handle_patch(sid, seq, payload, state):
+    # Base hash already verified by handler
+    patch = glyph.parse_patch(payload)
+    new_state = glyph.apply_patch(state.value, patch)
+    handler.cursor.set_state(sid, new_state)
+    return new_state
+
+@handler.on_base_mismatch
+def handle_mismatch(sid, frame):
+    # State diverged - request full resync
+    logger.warning(f"State mismatch on {sid}")
+    request_full_state(sid)
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Receiver verifies base hash
+func (h *Handler) OnPatch(frame *glyph.Frame, state *glyph.SIDState) error {
+    // Verify base hash
+    currentHash := glyph.FingerprintLoose(state.Value)
+    if frame.Base != "" && !strings.HasPrefix(currentHash, frame.Base) {
+        return ErrBaseMismatch
+    }
+    
+    // Apply patch
+    patch, err := glyph.ParsePatch(frame.Payload)
+    if err != nil {
+        return err
+    }
+    
+    newState, err := glyph.ApplyPatch(state.Value, patch)
+    if err != nil {
+        return err
+    }
+    
+    h.cursor.SetState(frame.SID, newState)
+    return nil
+}
+```
+
+```typescript TypeScript
+import { handler, fingerprintLoose, parsePatch, applyPatch } from 'glyph-js';
+
+// Receiver verifies base hash
+handler.onPatch((sid, seq, payload, state, base) => {
+  // Verify base hash
+  const currentHash = fingerprintLoose(state.value);
+  if (base && !currentHash.startsWith(base)) {
+    throw new BaseMismatchError(`State diverged on ${sid}`);
+  }
+  
+  // Apply patch
+  const patch = parsePatch(payload);
+  const newState = applyPatch(state.value, patch);
+  
+  handler.cursor.setState(sid, newState);
+  return newState;
+});
+```
+</CodeGroup>
+
+## Concurrent Safety
+
+Base hash verification prevents the "lost update" problem in distributed systems.
+
+### The Problem
+
+```
+1. Agent A reads state: {count=5}  (hash: abc123...)
+2. Agent B reads state: {count=5}  (hash: abc123...)
+3. Agent A writes: {count=6}       (hash: def456...)
+4. Agent B writes: {count=6}       ❌ Overwrites A's update!
+```
+
+### The Solution
+
+```
+1. Agent A reads state: {count=5}  (hash: abc123...)
+2. Agent B reads state: {count=5}  (hash: abc123...)
+3. Agent A sends patch with @base=abc123... → Accepted
+4. Agent B sends patch with @base=abc123... → Rejected (base mismatch)
+5. Agent B re-reads state: {count=6} (hash: def456...)
+6. Agent B sends patch with @base=def456... → Accepted
+```
+
+### Example: Optimistic Concurrency
+
+<CodeGroup>
+```python Python
+import glyph
+from glyph import stream
+
+def update_with_retry(writer, sid, seq, update_fn, max_retries=3):
+    """Apply update with optimistic concurrency control."""
+    for attempt in range(max_retries):
+        # Read current state
+        state = read_state(sid)
+        base_hash = glyph.fingerprint_loose(state)
+        
+        # Compute patch
+        patch = update_fn(state)
+        
+        # Send with base hash
+        try:
+            writer.write_frame(
+                sid=sid,
+                seq=seq,
+                kind="patch",
+                payload=patch,
+                base=base_hash[:16],
+            )
+            return  # Success
+        except BaseMismatchError:
+            # State changed, retry
+            logger.info(f"Retry {attempt + 1}/{max_retries}")
+            continue
+    
+    raise Exception("Max retries exceeded")
+
+# Usage
+update_with_retry(
+    writer, 
+    sid=1, 
+    seq=5,
+    update_fn=lambda state: glyph.patch([("~", "count", 1)])
+)
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+func UpdateWithRetry(
+    writer *glyph.Writer,
+    sid uint64,
+    seq uint64,
+    updateFn func(glyph.Value) (*glyph.Patch, error),
+    maxRetries int,
+) error {
+    for attempt := 0; attempt < maxRetries; attempt++ {
+        // Read current state
+        state, err := ReadState(sid)
+        if err != nil {
+            return err
+        }
+        
+        baseHash := glyph.FingerprintLoose(state)
+        
+        // Compute patch
+        patch, err := updateFn(state)
+        if err != nil {
+            return err
+        }
+        
+        // Send with base hash
+        err = writer.WriteFrame(glyph.Frame{
+            SID:     sid,
+            Seq:     seq,
+            Kind:    glyph.KindPatch,
+            Payload: patch.Bytes(),
+            Base:    baseHash[:16],
+        })
+        
+        if errors.Is(err, glyph.ErrBaseMismatch) {
+            // State changed, retry
+            log.Printf("Retry %d/%d", attempt+1, maxRetries)
+            continue
+        }
+        
+        return err  // Success or other error
+    }
+    
+    return errors.New("max retries exceeded")
+}
+```
+
+```typescript TypeScript
+import { Writer, fingerprintLoose, patch, BaseMismatchError } from 'glyph-js';
+
+async function updateWithRetry(
+  writer: Writer,
+  sid: number,
+  seq: number,
+  updateFn: (state: any) => Patch,
+  maxRetries = 3
+): Promise<void> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Read current state
+    const state = await readState(sid);
+    const baseHash = fingerprintLoose(state);
+    
+    // Compute patch
+    const p = updateFn(state);
+    
+    // Send with base hash
+    try {
+      await writer.writeFrame({
+        sid,
+        seq,
+        kind: 'patch',
+        payload: p,
+        base: baseHash.slice(0, 16),
+      });
+      return;  // Success
+    } catch (err) {
+      if (err instanceof BaseMismatchError) {
+        // State changed, retry
+        console.log(`Retry ${attempt + 1}/${maxRetries}`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  
+  throw new Error('Max retries exceeded');
+}
+```
+</CodeGroup>
+
+## Performance Benefits
+
+### Token Savings
+
+| Operation | Full State | Patch | Savings |
+|-----------|------------|-------|----------|
+| Increment counter | ~120 tokens | ~8 tokens | 93% |
+| Append to list | ~200 tokens | ~15 tokens | 92% |
+| Update 1 of 10 fields | ~180 tokens | ~12 tokens | 93% |
+| Update 3 of 10 fields | ~180 tokens | ~35 tokens | 80% |
+
+### When to Use Patches
+
+<AccordionGroup>
+  <Accordion title="High-Frequency Updates" icon="gauge-high">
+    For state that changes frequently (counters, progress, live metrics).
+    
+    **Example:** Agent updating turn count, token usage, or task completion percentage.
+  </Accordion>
+  
+  <Accordion title="Large State Documents" icon="file">
+    When the full state is large but updates are small.
+    
+    **Example:** 10KB agent memory, updating a single field.
+  </Accordion>
+  
+  <Accordion title="Distributed Agents" icon="network-wired">
+    When multiple agents may update the same state concurrently.
+    
+    **Example:** Multi-agent planning with shared task queue.
+  </Accordion>
+  
+  <Accordion title="Append-Only Logs" icon="list">
+    For streaming logs, events, or observation history.
+    
+    **Example:** ReAct loop appending tool results to observations.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Fingerprinting" href="/advanced/fingerprinting" icon="fingerprint">
+    Deep dive into SHA-256 state hashing
+  </Card>
+  <Card title="GS1 Streaming" href="/advanced/gs1-streaming" icon="stream">
+    Learn about frame-based patch delivery
+  </Card>
+  <Card title="Agent Patterns" href="/guides/agents" icon="robot">
+    See patches in multi-agent coordination
+  </Card>
+  <Card title="API Reference" href="/api-reference" icon="code">
+    Explore patch APIs in all languages
+  </Card>
+</CardGroup>

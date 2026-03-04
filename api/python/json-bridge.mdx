@@ -1,0 +1,643 @@
+---
+title: "JSON Bridge"
+description: "Convert between JSON/Python data and GLYPH format"
+---
+
+## Overview
+
+The JSON Bridge provides seamless conversion between Python/JSON data and GLYPH format. Use these functions to integrate GLYPH into existing JSON-based workflows.
+
+## Core Functions
+
+### json_to_glyph()
+
+Convert Python/JSON data directly to GLYPH canonical string.
+
+<ParamField path="data" type="Any" required>
+  Python value (dict, list, str, int, float, bool, None)
+</ParamField>
+
+<ParamField path="opts" type="LooseCanonOpts" default="None">
+  Optional canonicalization options
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Canonical GLYPH text representation
+</ResponseField>
+
+```python
+import glyph
+
+# Convert dict to GLYPH
+data = {"action": "search", "query": "weather in NYC", "max_results": 10}
+text = glyph.json_to_glyph(data)
+print(text)
+# Output: {action=search max_results=10 query="weather in NYC"}
+
+# Convert list to GLYPH
+data = [1, 2, 3, 4, 5]
+text = glyph.json_to_glyph(data)
+print(text)
+# Output: [1 2 3 4 5]
+```
+
+### glyph_to_json()
+
+Parse GLYPH string to Python/JSON value.
+
+<ParamField path="glyph_str" type="str" required>
+  GLYPH-formatted text
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  Python value (dict, list, str, int, float, bool, None)
+</ResponseField>
+
+```python
+import glyph
+
+# Parse GLYPH to Python dict
+text = '{action=search query="test"}'  
+data = glyph.glyph_to_json(text)
+print(data)
+# Output: {'action': 'search', 'query': 'test'}
+
+# Parse GLYPH list
+text = '[1 2 3]'
+data = glyph.glyph_to_json(text)
+print(data)
+# Output: [1, 2, 3]
+```
+
+### from_json() / from_json_loose()
+
+Convert Python value to GValue.
+
+<ParamField path="data" type="Any" required>
+  Python value to convert
+</ParamField>
+
+<ResponseField name="return" type="GValue">
+  GLYPH value object
+</ResponseField>
+
+```python
+import glyph
+
+# Convert Python types
+v1 = glyph.from_json(42)
+print(v1.as_int())  # 42
+
+v2 = glyph.from_json("hello")
+print(v2.as_str())  # "hello"
+
+v3 = glyph.from_json([1, 2, 3])
+print(len(v3))  # 3
+
+v4 = glyph.from_json({"name": "Alice", "age": 30})
+print(v4.get("name").as_str())  # "Alice"
+
+# None becomes null
+v5 = glyph.from_json(None)
+print(v5.is_null())  # True
+```
+
+### to_json() / to_json_loose()
+
+Convert GValue to Python value.
+
+<ParamField path="v" type="GValue" required>
+  GLYPH value to convert
+</ParamField>
+
+<ResponseField name="return" type="Any">
+  Python value (dict, list, str, int, float, bool, None)
+</ResponseField>
+
+```python
+from glyph import g, field
+import glyph
+
+# Convert GValue to Python
+v = g.int(42)
+data = glyph.to_json(v)
+print(data)  # 42
+print(type(data))  # <class 'int'>
+
+v = g.list(g.int(1), g.int(2), g.int(3))
+data = glyph.to_json(v)
+print(data)  # [1, 2, 3]
+
+v = g.map(field("name", g.str("Alice")), field("age", g.int(30)))
+data = glyph.to_json(v)
+print(data)  # {'name': 'Alice', 'age': 30}
+```
+
+## Serialization Functions
+
+### emit() / canonicalize_loose()
+
+Convert GValue to canonical GLYPH text.
+
+<ParamField path="v" type="GValue" required>
+  Value to canonicalize
+</ParamField>
+
+<ParamField path="opts" type="LooseCanonOpts" default="None">
+  Optional canonicalization options
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Canonical GLYPH text
+</ResponseField>
+
+```python
+from glyph import g, field
+import glyph
+
+# Emit a struct
+team = g.struct("Team",
+    field("name", g.str("Arsenal")),
+    field("rank", g.int(1))
+)
+print(glyph.emit(team))
+# Output: Team{name=Arsenal rank=1}
+
+# Emit with custom options
+from glyph import llm_loose_canon_opts
+v = g.null()
+print(glyph.canonicalize_loose(v, llm_loose_canon_opts()))
+# Output: _  (underscore instead of ∅)
+```
+
+### canonicalize_loose_no_tabular()
+
+Canonicalize without auto-tabular mode.
+
+<ParamField path="v" type="GValue" required>
+  Value to canonicalize
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Canonical GLYPH text without tabular format
+</ResponseField>
+
+```python
+from glyph import g, field
+import glyph
+
+# Create list of maps
+rows = g.list(
+    g.map(field("x", g.int(1)), field("y", g.int(2))),
+    g.map(field("x", g.int(3)), field("y", g.int(4))),
+    g.map(field("x", g.int(5)), field("y", g.int(6)))
+)
+
+# Normal emit uses tabular format
+print(glyph.emit(rows))
+# Output: @tab _ [x y]...
+
+# Disable tabular
+print(glyph.canonicalize_loose_no_tabular(rows))
+# Output: [{x=1 y=2} {x=3 y=4} {x=5 y=6}]
+```
+
+## JSON String Functions
+
+### parse_json_loose()
+
+Parse JSON string to GValue.
+
+<ParamField path="json_str" type="str" required>
+  JSON string to parse
+</ParamField>
+
+<ResponseField name="return" type="GValue">
+  Parsed GLYPH value
+</ResponseField>
+
+```python
+import glyph
+
+json_str = '{"name": "Alice", "age": 30}'
+v = glyph.parse_json_loose(json_str)
+print(v.get("name").as_str())  # "Alice"
+print(v.get("age").as_int())   # 30
+```
+
+### stringify_json_loose()
+
+Convert GValue to JSON string.
+
+<ParamField path="v" type="GValue" required>
+  Value to stringify
+</ParamField>
+
+<ParamField path="indent" type="int | None" default="None">
+  Optional indentation for pretty printing
+</ParamField>
+
+<ResponseField name="return" type="str">
+  JSON string
+</ResponseField>
+
+```python
+from glyph import g, field
+import glyph
+
+v = g.map(
+    field("name", g.str("Alice")),
+    field("age", g.int(30))
+)
+
+# Compact JSON
+json_str = glyph.stringify_json_loose(v)
+print(json_str)
+# Output: {"name": "Alice", "age": 30}
+
+# Pretty-printed JSON
+json_str = glyph.stringify_json_loose(v, indent=2)
+print(json_str)
+# Output:
+# {
+#   "name": "Alice",
+#   "age": 30
+# }
+```
+
+## Canonicalization Options
+
+### LooseCanonOpts
+
+Options for controlling canonicalization behavior.
+
+<ParamField path="auto_tabular" type="bool" default="True">
+  Enable auto-tabular mode for homogeneous lists
+</ParamField>
+
+<ParamField path="min_rows" type="int" default="3">
+  Minimum rows required for tabular format
+</ParamField>
+
+<ParamField path="max_cols" type="int" default="20">
+  Maximum columns allowed for tabular format
+</ParamField>
+
+<ParamField path="allow_missing" type="bool" default="True">
+  Allow missing fields in tabular rows
+</ParamField>
+
+<ParamField path="null_style" type="NullStyle" default="NullStyle.SYMBOL">
+  How to render null values (SYMBOL: ∅, UNDERSCORE: _)
+</ParamField>
+
+```python
+from glyph import LooseCanonOpts, NullStyle, g, canonicalize_loose
+
+# Custom options
+opts = LooseCanonOpts(
+    auto_tabular=False,
+    null_style=NullStyle.UNDERSCORE
+)
+
+v = g.null()
+print(canonicalize_loose(v, opts))
+# Output: _
+```
+
+### default_loose_canon_opts()
+
+Get default canonicalization options.
+
+<ResponseField name="return" type="LooseCanonOpts">
+  Default options with auto-tabular enabled
+</ResponseField>
+
+```python
+import glyph
+
+opts = glyph.default_loose_canon_opts()
+print(opts.auto_tabular)  # True
+print(opts.min_rows)      # 3
+```
+
+### llm_loose_canon_opts()
+
+Get LLM-optimized options (uses underscore for null).
+
+<ResponseField name="return" type="LooseCanonOpts">
+  Options optimized for LLM consumption
+</ResponseField>
+
+```python
+import glyph
+from glyph import g
+
+opts = glyph.llm_loose_canon_opts()
+v = g.null()
+print(glyph.canonicalize_loose(v, opts))
+# Output: _  (more LLM-friendly than ∅)
+```
+
+### no_tabular_loose_canon_opts()
+
+Get options with tabular mode disabled.
+
+<ResponseField name="return" type="LooseCanonOpts">
+  Options with auto_tabular=False
+</ResponseField>
+
+```python
+import glyph
+
+opts = glyph.no_tabular_loose_canon_opts()
+print(opts.auto_tabular)  # False
+```
+
+### NullStyle
+
+Enumeration for null rendering styles.
+
+- `NullStyle.SYMBOL` - Render as `∅` (human-readable Unicode)
+- `NullStyle.UNDERSCORE` - Render as `_` (ASCII-safe, LLM-friendly)
+
+```python
+from glyph import NullStyle, LooseCanonOpts, canonicalize_loose, g
+
+v = g.null()
+
+opts1 = LooseCanonOpts(null_style=NullStyle.SYMBOL)
+print(canonicalize_loose(v, opts1))  # ∅
+
+opts2 = LooseCanonOpts(null_style=NullStyle.UNDERSCORE)
+print(canonicalize_loose(v, opts2))  # _
+```
+
+## Utility Functions
+
+### fingerprint_loose()
+
+Compute SHA-256 fingerprint of canonical representation.
+
+<ParamField path="v" type="GValue" required>
+  Value to fingerprint
+</ParamField>
+
+<ParamField path="opts" type="LooseCanonOpts" default="None">
+  Optional canonicalization options (defaults to no tabular)
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Hex string of SHA-256 hash
+</ResponseField>
+
+```python
+from glyph import g, field
+import glyph
+
+v = g.map(
+    field("a", g.int(1)),
+    field("b", g.int(2))
+)
+
+fp = glyph.fingerprint_loose(v)
+print(fp)  # "3a5b7c..."
+print(len(fp))  # 64 (hex digits)
+
+# Fingerprints are deterministic
+fp2 = glyph.fingerprint_loose(v)
+assert fp == fp2
+
+# Order-independent for maps
+v2 = g.map(
+    field("b", g.int(2)),
+    field("a", g.int(1))
+)
+assert glyph.fingerprint_loose(v) == glyph.fingerprint_loose(v2)
+```
+
+### equal_loose()
+
+Check if two values are equal in canonical form.
+
+<ParamField path="a" type="GValue" required>
+  First value
+</ParamField>
+
+<ParamField path="b" type="GValue" required>
+  Second value
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  True if values are equal in canonical form
+</ResponseField>
+
+```python
+from glyph import g, field
+import glyph
+
+v1 = g.map(field("a", g.int(1)), field("b", g.int(2)))
+v2 = g.map(field("b", g.int(2)), field("a", g.int(1)))
+
+# Maps are compared with sorted keys
+assert glyph.equal_loose(v1, v2)
+
+v3 = g.map(field("a", g.int(1)), field("b", g.int(3)))
+assert not glyph.equal_loose(v1, v3)
+```
+
+## Type Conversion Rules
+
+### Python to GValue
+
+| Python Type | GValue Type | Example |
+|------------|-------------|----------|
+| `None` | NULL | `from_json(None)` → `g.null()` |
+| `bool` | BOOL | `from_json(True)` → `g.bool(True)` |
+| `int` | INT | `from_json(42)` → `g.int(42)` |
+| `float` | FLOAT | `from_json(3.14)` → `g.float(3.14)` |
+| `str` | STR | `from_json("hi")` → `g.str("hi")` |
+| `bytes` | BYTES | `from_json(b"data")` → `g.bytes(b"data")` |
+| `datetime` | TIME | `from_json(dt)` → `g.time(dt)` |
+| `list` | LIST | `from_json([1,2])` → `g.list(...)` |
+| `dict` | MAP | `from_json({"a":1})` → `g.map(...)` |
+
+### GValue to Python
+
+| GValue Type | Python Type | Notes |
+|------------|-------------|-------|
+| NULL | `None` | - |
+| BOOL | `bool` | - |
+| INT | `int` | - |
+| FLOAT | `float` | - |
+| STR | `str` | - |
+| BYTES | `str` | Base64-encoded string |
+| TIME | `str` | ISO-8601 format |
+| ID | `str` | Format: `^prefix:value` |
+| LIST | `list` | Recursive conversion |
+| MAP | `dict` | Recursive conversion |
+| STRUCT | `dict` | Includes `$type` field |
+| SUM | `dict` | Includes `$tag` and `$value` fields |
+
+### Special Conversions
+
+**Structs** are converted to dicts with a special `$type` field:
+
+```python
+from glyph import g, field
+import glyph
+
+v = g.struct("Person", field("name", g.str("Alice")))
+data = glyph.to_json(v)
+print(data)
+# Output: {'$type': 'Person', 'name': 'Alice'}
+```
+
+**Sum types** are converted to dicts with `$tag` and `$value` fields:
+
+```python
+from glyph import g
+import glyph
+
+v = g.sum("Some", g.int(42))
+data = glyph.to_json(v)
+print(data)
+# Output: {'$tag': 'Some', '$value': 42}
+```
+
+**Bytes** are base64-encoded:
+
+```python
+from glyph import g
+import glyph
+
+v = g.bytes(b"Hello")
+data = glyph.to_json(v)
+print(data)  # "SGVsbG8="
+```
+
+## Examples
+
+### Convert JSON API Response
+
+```python
+import glyph
+import json
+
+# Receive JSON from API
+json_response = '''{
+    "status": "success",
+    "data": [
+        {"id": 1, "name": "Alice", "score": 95},
+        {"id": 2, "name": "Bob", "score": 87}
+    ]
+}'''
+
+# Parse JSON and convert to GLYPH
+data = json.loads(json_response)
+glyph_text = glyph.json_to_glyph(data)
+print(glyph_text)
+
+# Much more compact than JSON!
+# Output:
+# @tab _ [id name score]
+# |1|Alice|95|
+# |2|Bob|87|
+# @end
+```
+
+### Store as GLYPH, Retrieve as JSON
+
+```python
+import glyph
+
+# Original data
+config = {
+    "database": {"host": "localhost", "port": 5432},
+    "cache": {"enabled": True, "ttl": 3600}
+}
+
+# Store in GLYPH format (more compact)
+glyph_text = glyph.json_to_glyph(config)
+print(f"GLYPH: {len(glyph_text)} bytes")
+print(glyph_text)
+
+# Retrieve as JSON
+restored = glyph.glyph_to_json(glyph_text)
+assert restored == config
+
+import json
+json_text = json.dumps(config)
+print(f"JSON: {len(json_text)} bytes")
+
+# GLYPH is 30-50% more compact!
+print(f"Savings: {100 * (1 - len(glyph_text)/len(json_text)):.1f}%")
+```
+
+### Roundtrip Conversion
+
+```python
+import glyph
+from glyph import g, field
+
+# Start with GValue
+original = g.struct("User",
+    field("id", g.int(42)),
+    field("name", g.str("Alice")),
+    field("active", g.bool(True))
+)
+
+# Convert to JSON
+json_data = glyph.to_json(original)
+print(json_data)
+# {'$type': 'User', 'id': 42, 'name': 'Alice', 'active': True}
+
+# Convert back to GValue
+restored = glyph.from_json(json_data)
+
+# Compare (note: struct info is lost in JSON conversion)
+print(glyph.emit(restored))
+# {$type=User active=t id=42 name=Alice}
+```
+
+### Deduplicate with Fingerprints
+
+```python
+import glyph
+from glyph import g, field
+
+# Create multiple equivalent values
+values = [
+    g.map(field("x", g.int(1)), field("y", g.int(2))),
+    g.map(field("y", g.int(2)), field("x", g.int(1))),  # Same as above
+    g.map(field("x", g.int(3)), field("y", g.int(4))),
+]
+
+# Deduplicate using fingerprints
+seen = set()
+unique = []
+
+for v in values:
+    fp = glyph.fingerprint_loose(v)
+    if fp not in seen:
+        seen.add(fp)
+        unique.append(v)
+
+print(f"Original: {len(values)} values")
+print(f"Unique: {len(unique)} values")
+# Original: 3 values
+# Unique: 2 values
+```
+
+## Performance Considerations
+
+1. **Bulk conversions**: Convert entire structures at once rather than field-by-field
+2. **Fingerprinting**: Use for deduplication but avoid for simple equality checks
+3. **Tabular mode**: Automatically enabled for lists of 3+ homogeneous maps
+4. **JSON compatibility**: Some information (like struct type names) requires special handling
+
+## Related Functions
+
+- [parse()](/api/python/parsing#parse) - Parse GLYPH text to GValue
+- [GValue](/api/python/core#gvalue) - Core value type
+- [emit()](/api/python/json-bridge#emit) - Serialize GValue to text

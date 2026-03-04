@@ -1,0 +1,399 @@
+---
+title: 'GS1 Streaming Protocol'
+description: 'Frame-based protocol for GLYPH payload transport'
+icon: 'stream'
+---
+
+## Specification ID
+
+**Spec ID:** `gs1-1.0.0`  
+**Date:** 2025-06-20  
+**Status:** Frozen (v1.0)
+
+<Info>
+GS1 headers are NOT part of GLYPH canonicalization. GS1 is a stream framing protocol only.
+</Info>
+
+## Scope
+
+**GS1** is a **stream framing protocol** for transporting a sequence of **GLYPH payloads** over streaming transports (TCP, WebSocket, pipes, files, SSE).
+
+- GS1 does **not** modify GLYPH syntax or canonicalization
+- A GS1 frame contains:
+  - A **GS1 header** (stream metadata)
+  - A **payload** that is **valid GLYPH text** (UTF-8 bytes)
+- Canonicalization, schema validation, and patch semantics are properties of the **payload**, not GS1
+
+### Relationship to GLYPH
+
+- A GS1 implementation **MUST NOT require changes** to the GLYPH parser
+- The GS1 reader is a separate layer that outputs `payloadBytes` to the normal GLYPH decoder
+
+## Terminology
+
+| Term | Definition |
+|------|------------|
+| **Frame** | One message in the stream (header + payload) |
+| **SID** | Stream identifier (multiplex key) |
+| **SEQ** | Per-SID sequence number (monotonic) |
+| **KIND** | Semantic category of the payload |
+| **BASE** | Optional state hash for patch safety |
+| **CRC** | Optional CRC-32 checksum for integrity |
+
+## Frame Kinds
+
+| Value | Name | Meaning |
+|------:|------|---------||
+| 0 | `doc` | Snapshot or general GLYPH document/value |
+| 1 | `patch` | GLYPH patch doc (`@patch ... @end`) |
+| 2 | `row` | Single row value (streaming tabular data) |
+| 3 | `ui` | UI event value (progress/log/artifact refs) |
+| 4 | `ack` | Acknowledgement (usually no payload) |
+| 5 | `err` | Error event (payload describes error) |
+| 6 | `ping` | Keepalive / liveness check |
+| 7 | `pong` | Ping response |
+
+Implementations **MUST** accept unknown kinds and surface them as `unknown(<byte>)`.
+
+## GS1-T (Text Framing)
+
+GS1-T is the text-based wire format, suitable for SSE, WebSocket text frames, logs, and debugging.
+
+### Frame Structure
+
+```
+@frame{key=value key=value ...}\n
+<exactly len bytes of payload>
+\n
+```
+
+### Header Grammar
+
+The header line starts with `@frame{` and ends with `}\n`.
+
+Inside `{}` is a space-separated or comma-separated list of `key=value` pairs.
+
+**Required keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `v` | uint8 | Protocol version (MUST be 1) |
+| `sid` | uint64 | Stream identifier |
+| `seq` | uint64 | Sequence number (per-SID, monotonic) |
+| `kind` | string/uint8 | Frame kind (name or number) |
+| `len` | uint32 | Payload length in bytes |
+
+**Optional keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `crc` | string | CRC-32 of payload: `crc32:<8hex>` or `<8hex>` |
+| `base` | string | State hash: `sha256:<64hex>` |
+| `final` | bool | End-of-stream marker for this SID |
+| `flags` | uint8 | Bitmask (hex) |
+
+### Payload Reading Rule
+
+<Warning>
+Receiver **MUST** read payload as raw bytes using `len`.  
+Receiver **MUST NOT** parse payload boundaries using delimiters.
+</Warning>
+
+### Trailing Newline
+
+- Writer **MUST** emit a trailing `\n` after payload
+- Reader **SHOULD** consume trailing `\n` but **MUST** accept EOF
+
+### Example Frame
+
+```glyph
+@frame{v=1 sid=1 seq=12 kind=patch len=32 crc=89abcdef base=sha256:0123456789abcdef...}
+@patch
+set .foo 42
+@end
+
+```
+
+## GS1-B (Binary Framing)
+
+GS1-B is reserved for future implementation. Binary header layout:
+
+```
+magic   3 bytes  "GS1"
+ver     1 byte   uint8 (1)
+flags   1 byte   uint8
+kind    1 byte   uint8
+sid     8 bytes  uint64 big-endian
+seq     8 bytes  uint64 big-endian
+len     4 bytes  uint32 big-endian
+[crc]   4 bytes  uint32 (if HAS_CRC)
+[base]  32 bytes (if HAS_BASE)
+payload len bytes
+```
+
+**Flags bits:**
+- bit 0 (`0x01`) = `HAS_CRC`
+- bit 1 (`0x02`) = `HAS_BASE`
+- bit 2 (`0x04`) = `FINAL`
+- bit 3 (`0x08`) = `COMPRESSED` (reserved for GS1.1)
+
+## Integrity: CRC-32
+
+When `crc` is present:
+
+- **Algorithm:** CRC-32 IEEE (polynomial 0xEDB88320)
+- **Input:** Payload bytes as transmitted
+- **Format:** `crc=<8 lowercase hex digits>` or `crc=crc32:<8hex>`
+
+<Warning>
+Receiver **MUST** verify CRC if present and reject frame on mismatch.
+</Warning>
+
+### Example
+
+<CodeGroup>
+
+```python Python
+import glyph
+import zlib
+
+payload = b'{action=search query=test}'
+crc = zlib.crc32(payload) & 0xffffffff
+print(f"crc={crc:08x}")
+```
+
+```go Go
+import (
+    "hash/crc32"
+    "fmt"
+)
+
+payload := []byte("{action=search query=test}")
+crc := crc32.ChecksumIEEE(payload)
+fmt.Printf("crc=%08x\n", crc)
+```
+
+```typescript TypeScript
+import { crc32 } from 'crc';
+
+const payload = Buffer.from('{action=search query=test}');
+const crc = crc32(payload);
+console.log(`crc=${crc.toString(16).padStart(8, '0')}`);
+```
+
+</CodeGroup>
+
+## Patch Safety: BASE Hash
+
+When `base` is present:
+
+- **Algorithm:** SHA-256
+- **Input:** `CanonicalizeStrict(stateDoc)` or `CanonicalizeLoose(stateDoc)`
+- **Format:** `base=sha256:<64 lowercase hex digits>`
+
+### State Hash Definition
+
+```
+base = sha256( Canonicalize(stateDoc) )
+```
+
+Sender and receiver **MUST** agree on canonicalization mode (Strict vs Loose).
+
+### Patch Application Rule
+
+For `kind=patch` frames with `base`:
+
+<Warning>
+Receiver **MUST NOT apply** patch if `receiverStateHash != base`.
+</Warning>
+
+On mismatch, receiver **SHOULD**:
+- Request a `doc` snapshot, OR
+- Emit an `err` frame, OR
+- Emit an `ack` with failure payload
+
+### Example
+
+<CodeGroup>
+
+```python Python
+import glyph
+
+# Sender side
+current_state = {"user": "alice", "count": 5}
+base_hash = glyph.fingerprint_loose(current_state)
+
+patch = {"count": 6}
+frame = {
+    "v": 1,
+    "sid": 1,
+    "seq": 10,
+    "kind": "patch",
+    "base": base_hash,
+    "payload": glyph.emit(patch)
+}
+
+# Receiver side
+if glyph.fingerprint_loose(receiver_state) == frame["base"]:
+    apply_patch(frame["payload"])
+else:
+    request_snapshot()  # State diverged
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Sender side
+currentState := map[string]any{"user": "alice", "count": 5}
+baseHash := glyph.FingerprintLoose(currentState)
+
+patch := map[string]any{"count": 6}
+frame := Frame{
+    V:       1,
+    SID:     1,
+    Seq:     10,
+    Kind:    KindPatch,
+    Base:    baseHash,
+    Payload: glyph.Emit(patch),
+}
+
+// Receiver side
+if glyph.FingerprintLoose(receiverState) == frame.Base {
+    applyPatch(frame.Payload)
+} else {
+    requestSnapshot() // State diverged
+}
+```
+
+</CodeGroup>
+
+## Ordering and Acknowledgement
+
+### SEQ Monotonicity
+
+For each `sid`:
+- `seq` **MUST** be monotonically increasing by 1
+- Receivers **SHOULD** detect gaps and handle appropriately
+
+### ACK Frames
+
+- `kind=ack` acknowledges receipt of `(sid, seq)`
+- `ack` frames typically have `len=0`
+- `ack` with payload may carry error/status details
+
+**Example:**
+```glyph
+@frame{v=1 sid=1 seq=13 kind=ack len=0}
+
+```
+
+### FINAL Flag
+
+- `final=true` indicates no more frames for this `sid`
+- Receiver may clean up per-SID state
+
+## Recommended Payload Schemas
+
+<Note>
+These are non-normative examples. Actual payload schemas are application-defined.
+</Note>
+
+### UI Event
+
+```glyph
+UIEvent@(type "progress" pct 0.42 msg "processing")
+UIEvent@(type "log" level "info" msg "decoded 1000 rows")
+UIEvent@(type "artifact" mime "image/png" ref "blob:sha256:..." name "plot.png")
+```
+
+### Error Event
+
+```glyph
+Err@(code "BASE_MISMATCH" sid 1 seq 13 expected "sha256:..." got "sha256:...")
+```
+
+### Row Event
+
+Payload is a single GLYPH value (struct/list) representing one row.
+
+### Patch Event
+
+```glyph
+@patch
+set .items[0].qty 5
+append .items[+] Item@(id 2 name "widget")
+@end
+```
+
+## Security Considerations
+
+<Warning>
+- CRC-32 is not cryptographic; it only detects accidental corruption
+- `base` hash prevents accidental state drift but is not authentication
+- Use TLS for transport security; GS1 does not provide encryption
+</Warning>
+
+Implementations **MUST** enforce maximum `len` (recommended: 64 MiB).
+
+## Conformance Checklist
+
+A GS1 implementation is conformant if it:
+
+1. ✓ Correctly reads/writes GS1-T frames per this spec
+2. ✓ Enforces `len` limits
+3. ✓ Verifies CRC-32 when present
+4. ✓ Parses `base` hash correctly
+5. ✓ Exposes `(sid, seq, kind, payloadBytes, base?, crc?)` to caller
+6. ✓ Does not require GLYPH parser changes
+7. ✓ Does not treat GS1 headers as part of GLYPH canonicalization
+
+## Test Vectors
+
+### Minimal Frame
+
+**Header:** `@frame{v=1 sid=0 seq=0 kind=doc len=2}`  
+**Payload:** `{}`
+
+**Full frame:**
+```glyph
+@frame{v=1 sid=0 seq=0 kind=doc len=2}
+{}
+```
+
+### Patch with CRC
+
+**Header:** `@frame{v=1 sid=1 seq=5 kind=patch len=24 crc=a1b2c3d4}`  
+**Payload:** `@patch\nset .x 1\n@end`
+
+### UI Event
+
+**Header:** `@frame{v=1 sid=1 seq=10 kind=ui len=35}`  
+**Payload:** `UIEvent@(type "progress" pct 0.5)`
+
+### ACK (no payload)
+
+**Header:** `@frame{v=1 sid=1 seq=10 kind=ack len=0}`  
+**Payload:** (empty)
+
+## Kind Name Mapping
+
+For GS1-T, `kind` can be specified as name or number:
+
+```
+kind=doc     <==> kind=0
+kind=patch   <==> kind=1
+kind=row     <==> kind=2
+kind=ui      <==> kind=3
+kind=ack     <==> kind=4
+kind=err     <==> kind=5
+kind=ping    <==> kind=6
+kind=pong    <==> kind=7
+```
+
+Unknown numeric kinds (8+) are valid and preserved.
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------||
+| 1.0.0 | 2025-06-20 | Initial frozen spec (GS1-T only) |

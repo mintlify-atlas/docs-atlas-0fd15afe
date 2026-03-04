@@ -1,0 +1,555 @@
+---
+title: 'Core Types'
+description: 'GLYPH core value types and operations'
+---
+
+## GValue
+
+The central type representing any GLYPH value.
+
+```go
+type GValue struct {
+    // Private fields
+}
+```
+
+## Type System
+
+### GType Enumeration
+
+```go
+type GType uint8
+
+const (
+    TypeNull   GType = iota
+    TypeBool
+    TypeInt
+    TypeFloat
+    TypeStr
+    TypeBytes
+    TypeTime
+    TypeID
+    TypeList
+    TypeMap
+    TypeStruct
+    TypeSum
+)
+```
+
+## Constructors
+
+Create GLYPH values using type-specific constructors:
+
+### Scalar Constructors
+
+<ParamField path="Null" type="func() *GValue">
+  Creates a null value.
+  
+  ```go
+  v := glyph.Null()
+  ```
+</ParamField>
+
+<ParamField path="Bool" type="func(v bool) *GValue">
+  Creates a boolean value.
+  
+  ```go
+  v := glyph.Bool(true)
+  ```
+</ParamField>
+
+<ParamField path="Int" type="func(v int64) *GValue">
+  Creates an integer value.
+  
+  ```go
+  v := glyph.Int(42)
+  ```
+</ParamField>
+
+<ParamField path="Float" type="func(v float64) *GValue">
+  Creates a float value.
+  
+  ```go
+  v := glyph.Float(3.14)
+  ```
+</ParamField>
+
+<ParamField path="Str" type="func(v string) *GValue">
+  Creates a string value.
+  
+  ```go
+  v := glyph.Str("hello")
+  ```
+</ParamField>
+
+<ParamField path="Bytes" type="func(v []byte) *GValue">
+  Creates a bytes value.
+  
+  ```go
+  v := glyph.Bytes([]byte{0x01, 0x02, 0x03})
+  ```
+</ParamField>
+
+<ParamField path="Time" type="func(v time.Time) *GValue">
+  Creates a time value.
+  
+  ```go
+  v := glyph.Time(time.Now())
+  ```
+</ParamField>
+
+<ParamField path="ID" type="func(prefix, value string) *GValue">
+  Creates a reference ID value.
+  
+  ```go
+  v := glyph.ID("m", "2024-01-15:ARS-LIV")
+  // Emits as: ^m:2024-01-15:ARS-LIV
+  ```
+</ParamField>
+
+### Container Constructors
+
+<ParamField path="List" type="func(values ...*GValue) *GValue">
+  Creates a list value.
+  
+  ```go
+  v := glyph.List(
+      glyph.Int(1),
+      glyph.Int(2),
+      glyph.Int(3),
+  )
+  // Emits as: [1 2 3]
+  ```
+</ParamField>
+
+<ParamField path="Map" type="func(entries ...MapEntry) *GValue">
+  Creates a map value.
+  
+  ```go
+  v := glyph.Map(
+      glyph.FieldVal("name", glyph.Str("Arsenal")),
+      glyph.FieldVal("score", glyph.Int(2)),
+  )
+  // Emits as: {name=Arsenal score=2}
+  ```
+</ParamField>
+
+<ParamField path="Struct" type="func(typeName string, fields ...MapEntry) *GValue">
+  Creates a typed struct value.
+  
+  ```go
+  v := glyph.Struct("Team",
+      glyph.FieldVal("id", glyph.ID("t", "ARS")),
+      glyph.FieldVal("name", glyph.Str("Arsenal")),
+  )
+  // Emits as: Team{id=^t:ARS name=Arsenal}
+  ```
+</ParamField>
+
+<ParamField path="Sum" type="func(tag string, value *GValue) *GValue">
+  Creates a tagged union value.
+  
+  ```go
+  v := glyph.Sum("Success", glyph.Int(42))
+  // Emits as: Success(42)
+  ```
+</ParamField>
+
+### Helper Functions
+
+<ParamField path="FieldVal" type="func(key string, value *GValue) MapEntry">
+  Creates a map entry for use in Map/Struct constructors.
+  
+  ```go
+  entry := glyph.FieldVal("name", glyph.Str("Arsenal"))
+  ```
+</ParamField>
+
+## Accessors
+
+Extract typed values from GValue instances:
+
+### Type Checking
+
+<ParamField path="Type" type="func(v *GValue) GType">
+  Returns the value's type.
+  
+  ```go
+  if v.Type() == glyph.TypeStruct {
+      // Handle struct
+  }
+  ```
+</ParamField>
+
+<ParamField path="IsNull" type="func(v *GValue) bool">
+  Returns true if value is null.
+  
+  ```go
+  if v.IsNull() {
+      return nil
+  }
+  ```
+</ParamField>
+
+### Scalar Accessors
+
+<ResponseField name="AsBool" type="func(v *GValue) (bool, error)">
+  Extracts boolean value or returns error.
+  
+  ```go
+  b, err := v.AsBool()
+  if err != nil {
+      return err
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsInt" type="func(v *GValue) (int64, error)">
+  Extracts integer value or returns error.
+  
+  ```go
+  n, err := v.AsInt()
+  if err != nil {
+      return err
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsFloat" type="func(v *GValue) (float64, error)">
+  Extracts float value or returns error.
+  
+  ```go
+  f, err := v.AsFloat()
+  if err != nil {
+      return err
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsStr" type="func(v *GValue) (string, error)">
+  Extracts string value or returns error.
+  
+  ```go
+  s, err := v.AsStr()
+  if err != nil {
+      return err
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsBytes" type="func(v *GValue) ([]byte, error)">
+  Extracts bytes value or returns error.
+  
+  ```go
+  b, err := v.AsBytes()
+  if err != nil {
+      return err
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsTime" type="func(v *GValue) (time.Time, error)">
+  Extracts time value or returns error.
+  
+  ```go
+  t, err := v.AsTime()
+  if err != nil {
+      return err
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsID" type="func(v *GValue) (RefID, error)">
+  Extracts reference ID or returns error.
+  
+  ```go
+  ref, err := v.AsID()
+  if err != nil {
+      return err
+  }
+  fmt.Printf("Prefix: %s, Value: %s\n", ref.Prefix, ref.Value)
+  ```
+</ResponseField>
+
+### Container Accessors
+
+<ResponseField name="AsList" type="func(v *GValue) ([]*GValue, error)">
+  Extracts list elements or returns error.
+  
+  ```go
+  list, err := v.AsList()
+  if err != nil {
+      return err
+  }
+  for i, elem := range list {
+      fmt.Printf("%d: %v\n", i, elem)
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsMap" type="func(v *GValue) ([]MapEntry, error)">
+  Extracts map entries or returns error.
+  
+  ```go
+  entries, err := v.AsMap()
+  if err != nil {
+      return err
+  }
+  for _, entry := range entries {
+      fmt.Printf("%s: %v\n", entry.Key, entry.Value)
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsStruct" type="func(v *GValue) (*StructValue, error)">
+  Extracts struct value or returns error.
+  
+  ```go
+  structVal, err := v.AsStruct()
+  if err != nil {
+      return err
+  }
+  fmt.Printf("Type: %s\n", structVal.TypeName)
+  for _, field := range structVal.Fields {
+      fmt.Printf("%s: %v\n", field.Key, field.Value)
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="AsSum" type="func(v *GValue) (*SumValue, error)">
+  Extracts sum value or returns error.
+  
+  ```go
+  sumVal, err := v.AsSum()
+  if err != nil {
+      return err
+  }
+  fmt.Printf("Tag: %s, Value: %v\n", sumVal.Tag, sumVal.Value)
+  ```
+</ResponseField>
+
+## Field Access
+
+<ParamField path="Get" type="func(v *GValue, key string) *GValue">
+  Returns field value by key from map or struct, or nil if not found.
+  
+  ```go
+  name := team.Get("name")
+  if name != nil {
+      str, _ := name.AsStr()
+      fmt.Println(str)
+  }
+  ```
+</ParamField>
+
+<ParamField path="Index" type="func(v *GValue, i int) (*GValue, error)">
+  Returns i-th element of a list or returns error.
+  
+  ```go
+  elem, err := list.Index(0)
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+<ParamField path="Len" type="func(v *GValue) int">
+  Returns length of list, map, or struct.
+  
+  ```go
+  count := list.Len()
+  fmt.Printf("List has %d elements\n", count)
+  ```
+</ParamField>
+
+## Mutation
+
+<ParamField path="Set" type="func(v *GValue, key string, val *GValue)">
+  Sets field value on a map or struct.
+  
+  ```go
+  team.Set("score", glyph.Int(3))
+  ```
+</ParamField>
+
+<ParamField path="Append" type="func(v *GValue, val *GValue)">
+  Appends value to a list.
+  
+  ```go
+  list.Append(glyph.Int(4))
+  ```
+</ParamField>
+
+## Supporting Types
+
+### RefID
+
+Represents a reference identifier.
+
+```go
+type RefID struct {
+    Prefix string // e.g., "m" for match, "t" for team
+    Value  string // The actual ID value
+}
+
+func (r RefID) String() string // Returns "^prefix:value"
+```
+
+### MapEntry
+
+Represents a key-value pair.
+
+```go
+type MapEntry struct {
+    Key   string
+    Value *GValue
+}
+```
+
+### StructValue
+
+Represents a typed struct.
+
+```go
+type StructValue struct {
+    TypeName string
+    Fields   []MapEntry
+}
+```
+
+### SumValue
+
+Represents a tagged union.
+
+```go
+type SumValue struct {
+    Tag   string
+    Value *GValue
+}
+```
+
+## Bridge Functions
+
+Convert between GLYPH and other formats:
+
+### SJSON Conversion
+
+<ParamField path="ToSJSON" type="func(v *GValue) *sjson.Value">
+  Converts GValue to SJSON value.
+  
+  ```go
+  sjsonVal := glyph.ToSJSON(glyphVal)
+  ```
+</ParamField>
+
+<ParamField path="FromSJSON" type="func(v *sjson.Value) *GValue">
+  Converts SJSON value to GValue.
+  
+  ```go
+  glyphVal := glyph.FromSJSON(sjsonVal)
+  ```
+</ParamField>
+
+### JSON Conversion
+
+<ParamField path="ToJSON" type="func(v *GValue) ([]byte, error)">
+  Converts GValue to JSON bytes.
+  
+  ```go
+  jsonBytes, err := glyph.ToJSON(value)
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+<ParamField path="FromJSON" type="func(data []byte) (*GValue, error)">
+  Parses JSON bytes into GValue.
+  
+  ```go
+  value, err := glyph.FromJSON(jsonBytes)
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+### Go Native Conversion
+
+<ParamField path="ToAny" type="func(v *GValue) any">
+  Converts GValue to Go any (interface{}) for JSON/Gen1 interop.
+  
+  ```go
+  native := glyph.ToAny(value)
+  jsonBytes, _ := json.Marshal(native)
+  ```
+</ParamField>
+
+<ParamField path="FromAny" type="func(v any) *GValue">
+  Converts Go any (interface{}) to GValue.
+  
+  ```go
+  var obj any
+  json.Unmarshal(jsonBytes, &obj)
+  value := glyph.FromAny(obj)
+  ```
+</ParamField>
+
+### Binary Encoding
+
+<ParamField path="EncodeBinary" type="func(v *GValue) ([]byte, error)">
+  Encodes GValue to SJSON binary format.
+  
+  ```go
+  binary, err := glyph.EncodeBinary(value)
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+<ParamField path="DecodeBinary" type="func(data []byte) (*GValue, error)">
+  Decodes SJSON binary format to GValue.
+  
+  ```go
+  value, err := glyph.DecodeBinary(binary)
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+## Example: Building Complex Structures
+
+```go
+// Create a match result
+match := glyph.Struct("Match",
+    glyph.FieldVal("id", glyph.ID("m", "2024-01-15:ARS-LIV")),
+    glyph.FieldVal("kickoff", glyph.Time(time.Now())),
+    glyph.FieldVal("home", glyph.Struct("Team",
+        glyph.FieldVal("id", glyph.ID("t", "ARS")),
+        glyph.FieldVal("name", glyph.Str("Arsenal")),
+    )),
+    glyph.FieldVal("away", glyph.Struct("Team",
+        glyph.FieldVal("id", glyph.ID("t", "LIV")),
+        glyph.FieldVal("name", glyph.Str("Liverpool")),
+    )),
+    glyph.FieldVal("xG", glyph.List(
+        glyph.Float(1.72),
+        glyph.Float(2.14),
+    )),
+    glyph.FieldVal("odds", glyph.List(
+        glyph.Float(2.10),
+        glyph.Float(3.40),
+        glyph.Float(3.25),
+    )),
+)
+
+// Access nested fields
+homeTeam := match.Get("home")
+if homeTeam != nil {
+    teamStruct, _ := homeTeam.AsStruct()
+    name := teamStruct.Fields[1].Value
+    fmt.Println(name) // Arsenal
+}
+```

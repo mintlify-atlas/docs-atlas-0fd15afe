@@ -1,0 +1,440 @@
+---
+title: "GS1 Streaming Protocol"
+description: "Frame-based streaming protocol for GLYPH payloads with CRC-32 and SHA-256 verification"
+---
+
+## Overview
+
+**GS1** (GLYPH Stream v1) is a **stream framing protocol** for transporting a sequence of GLYPH payloads over streaming transports.
+
+<Info>
+**Spec ID:** `gs1-1.0.0`  
+**Status:** Frozen (v1.0)  
+**Date:** 2025-06-20
+</Info>
+
+### What GS1 Provides
+
+<CardGroup cols={2}>
+  <Card title="Stream Multiplexing" icon="network-wired">
+    Multiple logical streams over one connection (SID-based routing)
+  </Card>
+  <Card title="Sequence Tracking" icon="list-ol">
+    Monotonic sequence numbers per stream for ordering and gap detection
+  </Card>
+  <Card title="Integrity Checking" icon="shield-check">
+    CRC-32 checksums to detect transmission corruption
+  </Card>
+  <Card title="State Verification" icon="fingerprint">
+    SHA-256 base hashes for safe patch application
+  </Card>
+</CardGroup>
+
+### Supported Transports
+
+- **TCP** sockets
+- **WebSocket** (text and binary frames)
+- **Server-Sent Events** (SSE)
+- **Unix pipes**
+- **Files** (log replay, batch processing)
+
+## Relationship to GLYPH
+
+<Warning>
+GS1 does **not** modify GLYPH syntax or canonicalization.
+</Warning>
+
+A GS1 frame contains:
+- A **GS1 header** (stream metadata)
+- A **payload** that is **valid GLYPH text** (UTF-8 bytes)
+
+Canonicalization, schema validation, and patch semantics are properties of the **payload**, not GS1.
+
+**Key principle:** A GS1 implementation **MUST NOT require changes** to the GLYPH parser. The GS1 reader is a separate layer that outputs `payloadBytes` to the normal GLYPH decoder.
+
+## Terminology
+
+| Term | Definition |
+|------|------------|
+| **Frame** | One message in the stream (header + payload) |
+| **SID** | Stream identifier (multiplex key) |
+| **SEQ** | Per-SID sequence number (monotonic) |
+| **KIND** | Semantic category of the payload |
+| **BASE** | Optional state hash for patch safety |
+| **CRC** | Optional CRC-32 checksum for integrity |
+
+## Frame Kinds
+
+| Value | Name | Meaning |
+|------:|------|----------|
+| 0 | `doc` | Snapshot or general GLYPH document/value |
+| 1 | `patch` | GLYPH patch doc (`@patch ... @end`) |
+| 2 | `row` | Single row value (streaming tabular data) |
+| 3 | `ui` | UI event value (progress/log/artifact refs) |
+| 4 | `ack` | Acknowledgement (usually no payload) |
+| 5 | `err` | Error event (payload describes error) |
+| 6 | `ping` | Keepalive / liveness check |
+| 7 | `pong` | Ping response |
+
+<Info>
+Implementations **MUST** accept unknown kinds and surface them as `unknown(<byte>)`.
+</Info>
+
+## GS1-T (Text Framing)
+
+GS1-T is the text-based wire format, suitable for SSE, WebSocket text frames, logs, and debugging.
+
+### Frame Structure
+
+```
+@frame{key=value key=value ...}\n
+<exactly len bytes of payload>\n
+```
+
+### Header Grammar
+
+The header line starts with `@frame{` and ends with `}\n`.
+
+Inside `{}` is a space-separated or comma-separated list of `key=value` pairs.
+
+**Required keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `v` | uint8 | Protocol version (MUST be 1) |
+| `sid` | uint64 | Stream identifier |
+| `seq` | uint64 | Sequence number (per-SID, monotonic) |
+| `kind` | string/uint8 | Frame kind (name or number) |
+| `len` | uint32 | Payload length in bytes |
+
+**Optional keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `crc` | string | CRC-32 of payload: `crc32:<8hex>` or `<8hex>` |
+| `base` | string | State hash: `sha256:<64hex>` |
+| `final` | bool | End-of-stream marker for this SID |
+| `flags` | uint8 | Bitmask (hex) |
+
+### Payload Reading Rule (Critical)
+
+<Warning>
+**Receiver MUST read payload as raw bytes using `len`.**
+
+**Receiver MUST NOT parse payload boundaries using delimiters.**
+</Warning>
+
+This is critical for correctness. The payload may contain `@frame{` sequences or other patterns that look like frame boundaries. Always read exactly `len` bytes.
+
+### Example Frames
+
+```glyph
+# Minimal frame
+@frame{v=1 sid=0 seq=0 kind=doc len=2}
+{}
+
+# Document frame with CRC
+@frame{v=1 sid=1 seq=0 kind=doc len=42 crc=a1b2c3d4}
+Match{home=Arsenal away=Liverpool score=[2 1]}
+
+# Patch frame with base hash
+@frame{v=1 sid=1 seq=1 kind=patch len=18 base=sha256:abc123...}
+@patch
+= score [3 1]
+@end
+
+# UI progress event
+@frame{v=1 sid=1 seq=2 kind=ui len=28}
+Progress{pct=0.75 msg="processing"}
+
+# Acknowledgement (no payload)
+@frame{v=1 sid=1 seq=10 kind=ack len=0}
+
+```
+
+## CRC-32 Integrity Checking
+
+When `crc` is present:
+
+- **Algorithm:** CRC-32 IEEE (polynomial 0xEDB88320)
+- **Input:** Payload bytes as transmitted
+- **Format in GS1-T:** `crc=<8 lowercase hex digits>` or `crc=crc32:<8hex>`
+
+<Warning>
+Receiver **MUST** verify CRC if present and reject frame on mismatch.
+</Warning>
+
+### Example: Computing CRC-32
+
+<CodeGroup>
+```python Python
+import zlib
+
+payload = b"Match{home=Arsenal away=Liverpool score=[2 1]}"
+crc = zlib.crc32(payload) & 0xffffffff
+crc_hex = f"{crc:08x}"
+print(f"crc={crc_hex}")  # crc=a1b2c3d4
+```
+
+```go Go
+import (
+    "encoding/binary"
+    "hash/crc32"
+)
+
+payload := []byte("Match{home=Arsenal away=Liverpool score=[2 1]}")
+crc := crc32.ChecksumIEEE(payload)
+crcHex := fmt.Sprintf("%08x", crc)
+// crc=a1b2c3d4
+```
+
+```typescript TypeScript
+import crc32 from 'crc-32';
+
+const payload = Buffer.from('Match{home=Arsenal away=Liverpool score=[2 1]}');
+const crc = crc32.buf(payload) >>> 0; // Unsigned
+const crcHex = crc.toString(16).padStart(8, '0');
+// crc=a1b2c3d4
+```
+</CodeGroup>
+
+<Info>
+**CRC-32 is not cryptographic.** It only detects accidental corruption. Use TLS for transport security.
+</Info>
+
+## SHA-256 Base Hash for Patch Safety
+
+When `base` is present:
+
+- **Algorithm:** SHA-256
+- **Input:** `CanonicalizeStrict(stateDoc)` or `CanonicalizeLoose(stateDoc)`
+- **Format in GS1-T:** `base=sha256:<64 lowercase hex digits>`
+
+### State Hash Definition
+
+```
+base = sha256( Canonicalize(stateDoc) )
+```
+
+<Warning>
+Sender and receiver **MUST** agree on canonicalization mode (Strict vs Loose).
+</Warning>
+
+### Patch Application Rule
+
+For `kind=patch` frames with `base`:
+
+- Receiver **MUST NOT apply** patch if `receiverStateHash != base`
+- On mismatch, receiver **SHOULD**:
+  - Request a `doc` snapshot, OR
+  - Emit an `err` frame, OR
+  - Emit an `ack` with failure payload
+
+### Example: Safe Patch Application
+
+<CodeGroup>
+```python Python
+from glyph import stream
+import hashlib
+
+# Sender: compute base hash
+current_state = {"count": 5, "status": "active"}
+canonical = glyph.emit(glyph.from_json(current_state))
+base_hash = hashlib.sha256(canonical.encode()).hexdigest()
+
+# Send patch with base
+writer.write_frame(
+    sid=1,
+    seq=5,
+    kind="patch",
+    payload=patch_bytes,
+    base=f"sha256:{base_hash}",
+)
+
+# Receiver: verify before applying
+@handler.on_patch
+def handle_patch(sid, seq, payload, state):
+    # Base hash already verified by handler
+    patch = glyph.parse_patch(payload)
+    new_state = apply_patch(state.value, patch)
+    handler.cursor.set_state(sid, new_state)
+    return new_state
+
+@handler.on_base_mismatch
+def handle_mismatch(sid, frame):
+    logger.warning(f"State mismatch on {sid}")
+    request_full_state(sid)
+```
+
+```go Go
+import (
+    "crypto/sha256"
+    "encoding/hex"
+    "github.com/Neumenon/glyph"
+)
+
+// Sender: compute base hash
+canonical := glyph.CanonicalizeLoose(currentState)
+hash := sha256.Sum256([]byte(canonical))
+baseHash := "sha256:" + hex.EncodeToString(hash[:])
+
+// Send patch with base
+writer.WriteFrame(glyph.Frame{
+    SID:     1,
+    Seq:     5,
+    Kind:    glyph.KindPatch,
+    Payload: patchBytes,
+    Base:    baseHash,
+})
+
+// Receiver: verify before applying
+func (h *Handler) OnPatch(frame *glyph.Frame, state *glyph.SIDState) error {
+    // Base hash already verified
+    patch, err := glyph.ParsePatch(frame.Payload)
+    if err != nil {
+        return err
+    }
+    newState, err := glyph.ApplyPatch(state.Value, patch)
+    if err != nil {
+        return err
+    }
+    h.cursor.SetState(frame.SID, newState)
+    return nil
+}
+```
+
+```typescript TypeScript
+import { createHash } from 'crypto';
+import { stream, emit, fromJSON } from 'glyph-js';
+
+// Sender: compute base hash
+const currentState = {count: 5, status: 'active'};
+const canonical = emit(fromJSON(currentState));
+const baseHash = 'sha256:' + createHash('sha256')
+  .update(canonical)
+  .digest('hex');
+
+// Send patch with base
+writer.writeFrame({
+  sid: 1,
+  seq: 5,
+  kind: 'patch',
+  payload: patchBytes,
+  base: baseHash,
+});
+
+// Receiver: verify before applying
+handler.onPatch((sid, seq, payload, state) => {
+  // Base hash already verified
+  const patch = parsePatch(payload);
+  const newState = applyPatch(state.value, patch);
+  handler.cursor.setState(sid, newState);
+  return newState;
+});
+```
+</CodeGroup>
+
+## Ordering and Acknowledgement
+
+### SEQ Monotonicity
+
+For each `sid`:
+- `seq` **MUST** be monotonically increasing by 1
+- Receivers **SHOULD** detect gaps and handle appropriately
+
+### ACK Frames
+
+- `kind=ack` acknowledges receipt of `(sid, seq)`
+- `ack` frames typically have `len=0`
+- `ack` with payload may carry error/status details
+
+### FINAL Flag
+
+- `final=true` indicates no more frames for this `sid`
+- Receiver may clean up per-SID state
+
+## Stream Multiplexing
+
+Use stream IDs (SID) to multiplex multiple logical streams over one connection.
+
+### Example: Multi-Agent Coordination
+
+```python
+# Coordinator assigns SIDs
+PLANNER_SID = 1
+EXECUTOR_SID = 2
+CRITIC_SID = 3
+
+# Planner sends task to executor
+writer.write_frame(
+    sid=EXECUTOR_SID,
+    seq=0,
+    kind="doc",
+    payload=glyph.emit(glyph.struct("Task",
+        action="search",
+        query="latest AI news",
+    ))
+)
+
+# Executor sends result back to planner
+writer.write_frame(
+    sid=PLANNER_SID,
+    seq=0,
+    kind="doc",
+    payload=glyph.emit(glyph.struct("Result",
+        task_id=1,
+        status="complete",
+        data=search_results,
+    ))
+)
+
+# Critic sends feedback to executor
+writer.write_frame(
+    sid=EXECUTOR_SID,
+    seq=1,
+    kind="doc",
+    payload=glyph.emit(glyph.struct("Feedback",
+        task_id=1,
+        score=0.8,
+        suggestion="Include source URLs",
+    ))
+)
+```
+
+## Security Considerations
+
+<Warning>
+- **CRC-32 is not cryptographic** - it only detects accidental corruption
+- **`base` hash prevents accidental state drift** but is not authentication
+- **Implementations MUST enforce maximum `len`** (recommended: 64 MiB)
+- **Use TLS for transport security** - GS1 does not provide encryption
+</Warning>
+
+## Conformance Checklist
+
+A GS1 implementation is conformant if it:
+
+1. ✅ Correctly reads/writes GS1-T frames per this spec
+2. ✅ Enforces `len` limits
+3. ✅ Verifies CRC-32 when present
+4. ✅ Parses `base` hash correctly
+5. ✅ Exposes `(sid, seq, kind, payloadBytes, base?, crc?)` to caller
+6. ✅ Does not require GLYPH parser changes
+7. ✅ Does not treat GS1 headers as part of GLYPH canonicalization
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Patches" href="/advanced/patches" icon="code-merge">
+    Learn how to create and apply incremental state updates
+  </Card>
+  <Card title="Fingerprinting" href="/advanced/fingerprinting" icon="fingerprint">
+    Understand SHA-256 hashing for state verification
+  </Card>
+  <Card title="Loose Mode" href="/advanced/loose-mode" icon="sparkles">
+    Explore schema-optional GLYPH for flexible data
+  </Card>
+  <Card title="Agent Patterns" href="/guides/agents" icon="robot">
+    See GS1 streaming in multi-agent systems
+  </Card>
+</CardGroup>

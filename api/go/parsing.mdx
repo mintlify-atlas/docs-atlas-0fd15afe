@@ -1,0 +1,372 @@
+---
+title: 'Parsing'
+description: 'Parse GLYPH-T text with error tolerance and schema validation'
+---
+
+## Parse Functions
+
+### Basic Parsing
+
+<ParamField path="Parse" type="func(input string) (*ParseResult, error)">
+  Parses GLYPH-T text with default tolerant mode.
+  
+  ```go
+  result, err := glyph.Parse(`Team{id=^t:ARS name="Arsenal"}`)
+  if err != nil {
+      return err
+  }
+  
+  if result.HasErrors() {
+      for _, e := range result.Errors {
+          fmt.Printf("Error: %s at %s\n", e.Message, e.Pos)
+      }
+  }
+  
+  team := result.Value
+  ```
+</ParamField>
+
+<ParamField path="ParseWithSchema" type="func(input string, schema *Schema) (*ParseResult, error)">
+  Parses with schema validation and wire key resolution.
+  
+  ```go
+  schema, _ := glyph.ParseSchema(`
+      @schema{
+          Team:v1 struct{
+              id: id @k(t)
+              name: str @k(n)
+          }
+      }
+  `)
+  
+  // Wire keys (t, n) are resolved to full names
+  result, err := glyph.ParseWithSchema(
+      `Team{t=^t:ARS n="Arsenal"}`,
+      schema,
+  )
+  ```
+</ParamField>
+
+<ParamField path="ParseWithOptions" type="func(input string, opts ParseOptions) (*ParseResult, error)">
+  Parses with full control over options.
+  
+  ```go
+  result, err := glyph.ParseWithOptions(input, glyph.ParseOptions{
+      Schema:   schema,
+      Tolerant: true,
+  })
+  ```
+</ParamField>
+
+## Parse Options
+
+```go
+type ParseOptions struct {
+    Schema   *Schema // Schema for validation and repair
+    Tolerant bool    // Enable error tolerance mode
+}
+```
+
+<ParamField path="Schema" type="*Schema">
+  Optional schema for type-aware parsing and validation.
+  
+  - Enables wire key resolution (short keys → full field names)
+  - Validates field types and constraints
+  - Provides fuzzy field name matching
+</ParamField>
+
+<ParamField path="Tolerant" type="bool">
+  Enable tolerant parsing mode (default: true).
+  
+  When enabled:
+  - Accepts both `=` and `:` for field assignment
+  - Accepts optional commas between elements
+  - Auto-corrects common LLM mistakes
+  - Auto-closes unterminated structures
+  - Uses schema for field name fuzzy matching
+</ParamField>
+
+## Parse Result
+
+```go
+type ParseResult struct {
+    Value    *GValue        // Parsed value
+    Errors   []ParseError   // Parse errors
+    Warnings []ParseError   // Parse warnings
+    Schema   *Schema        // Schema used (if any)
+}
+```
+
+<ResponseField name="Value" type="*GValue">
+  The parsed GLYPH value. May be nil if parsing failed.
+</ResponseField>
+
+<ResponseField name="Errors" type="[]ParseError">
+  List of errors encountered during parsing.
+  
+  ```go
+  if result.HasErrors() {
+      for _, e := range result.Errors {
+          fmt.Printf("%s at %s\n", e.Message, e.Pos)
+      }
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="Warnings" type="[]ParseError">
+  List of warnings (non-fatal issues) encountered.
+  
+  ```go
+  for _, w := range result.Warnings {
+      log.Printf("Warning: %s at %s\n", w.Message, w.Pos)
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="HasErrors" type="func() bool">
+  Returns true if any errors were encountered.
+  
+  ```go
+  if result.HasErrors() {
+      return fmt.Errorf("parse failed")
+  }
+  ```
+</ResponseField>
+
+## Parse Error
+
+```go
+type ParseError struct {
+    Message string
+    Pos     Position
+}
+
+type Position struct {
+    Line   int
+    Column int
+    Offset int
+}
+```
+
+<ResponseField name="Message" type="string">
+  Human-readable error message.
+</ResponseField>
+
+<ResponseField name="Pos" type="Position">
+  Source location where error occurred.
+  
+  ```go
+  fmt.Printf("Error at line %d, column %d: %s\n",
+      err.Pos.Line, err.Pos.Column, err.Message)
+  ```
+</ResponseField>
+
+## Error Tolerance
+
+GLYPH-T parsing is designed to be forgiving of LLM mistakes:
+
+### Flexible Syntax
+
+```go
+// Both = and : accepted for field assignment
+result1, _ := glyph.Parse(`{name="Arsenal"}`)
+result2, _ := glyph.Parse(`{name:"Arsenal"}`)
+// Both produce the same result
+```
+
+### Optional Commas
+
+```go
+// Commas optional in lists and maps
+result1, _ := glyph.Parse(`[1 2 3]`)
+result2, _ := glyph.Parse(`[1, 2, 3]`)
+// Both produce the same result
+```
+
+### Auto-Closing
+
+```go
+// Unterminated structures auto-closed in tolerant mode
+result, _ := glyph.Parse(`{name="Arsenal"`) // Missing }
+// Warning generated but parsing succeeds
+```
+
+### Wire Key Resolution
+
+With a schema, short wire keys are resolved to full field names:
+
+```go
+schema, _ := glyph.ParseSchema(`
+    @schema{
+        Team:v1 struct{
+            id: id @k(t)
+            name: str @k(n)
+            league: str @k(l) [optional]
+        }
+    }
+`)
+
+// Wire keys resolved automatically
+result, _ := glyph.ParseWithSchema(
+    `Team{t=^t:ARS n="Arsenal" l=EPL}`,
+    schema,
+)
+
+// Equivalent to:
+// Team{id=^t:ARS name="Arsenal" league=EPL}
+```
+
+## ParseLoose
+
+Parse loose/canonical GLYPH format:
+
+<ParamField path="ParseLoose" type="func(input string) (*GValue, error)">
+  Parses canonical GLYPH-Loose format.
+  
+  ```go
+  value, err := glyph.ParseLoose(`{name=Arsenal score=2}`)
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+<ParamField path="ParseLoosePayload" type="func(input string, registry *SchemaRegistry) (*GValue, *SchemaContext, error)">
+  Parses GLYPH payload with optional schema directive.
+  
+  ```go
+  registry := glyph.NewSchemaRegistry()
+  
+  value, ctx, err := glyph.ParseLoosePayload(`
+      @schema#abc123 @keys=[action query]
+      {#0=search #1="weather NYC"}
+  `, registry)
+  ```
+</ParamField>
+
+## Schema Parsing
+
+<ParamField path="ParseSchema" type="func(input string) (*Schema, error)">
+  Parses a GLYPH schema definition.
+  
+  ```go
+  schema, err := glyph.ParseSchema(`
+      @schema{
+          Team:v1 struct{
+              id: id @k(t)
+              name: str @k(n)
+              league: str @k(l) [optional]
+              founded: int [min=1800 max=2024]
+          }
+          
+          Match:v1 struct{
+              id: id @k(m)
+              kickoff: time @k(k)
+              home: Team @k(H)
+              away: Team @k(A)
+              odds: list<float> @k(O)
+          }
+      }
+  `)
+  
+  if err != nil {
+      return err
+  }
+  ```
+</ParamField>
+
+## Example: Error Handling
+
+```go
+func parseTeam(input string) (*glyph.GValue, error) {
+    result, err := glyph.Parse(input)
+    if err != nil {
+        return nil, fmt.Errorf("parse failed: %w", err)
+    }
+    
+    // Log warnings but continue
+    for _, w := range result.Warnings {
+        log.Printf("Warning at %s: %s\n", w.Pos, w.Message)
+    }
+    
+    // Fail on errors
+    if result.HasErrors() {
+        var errMsg strings.Builder
+        for _, e := range result.Errors {
+            errMsg.WriteString(fmt.Sprintf("  %s at %s\n",
+                e.Message, e.Pos))
+        }
+        return nil, fmt.Errorf("parse errors:\n%s",
+            errMsg.String())
+    }
+    
+    return result.Value, nil
+}
+```
+
+## Example: Schema-Aware Parsing
+
+```go
+// Define schema
+schema, _ := glyph.ParseSchema(`
+    @schema{
+        Match:v1 struct{
+            id: id @k(m)
+            kickoff: time @k(k)
+            home: Team @k(H)
+            away: Team @k(A)
+            xG: list<float> @k(xG)
+        }
+        
+        Team:v1 struct{
+            id: id @k(t)
+            name: str @k(n)
+        }
+    }
+`)
+
+// Parse with compact wire keys
+result, _ := glyph.ParseWithSchema(`
+    Match{
+        m=^m:2025-12-19:ARS-LIV
+        k=2025-12-19T20:00Z
+        H=Team{t=^t:ARS n="Arsenal"}
+        A=Team{t=^t:LIV n="Liverpool"}
+        xG=[1.72 2.14]
+    }
+`, schema)
+
+match := result.Value
+
+// Access with full field names
+kickoff := match.Get("kickoff")
+homeTeam := match.Get("home")
+```
+
+## Example: Tabular Parsing
+
+Parse tabular format for lists of homogeneous objects:
+
+```go
+input := `
+@tab _ [id name score]
+|^t:ARS|Arsenal|87|
+|^t:LIV|Liverpool|86|
+|^t:MCI|Man City|85|
+@end
+`
+
+value, err := glyph.ParseTabularLoose(input)
+if err != nil {
+    return err
+}
+
+// Result is a list of maps
+list, _ := value.AsList()
+for _, item := range list {
+    id := item.Get("id")
+    name := item.Get("name")
+    score := item.Get("score")
+    fmt.Printf("%s: %s - %d\n", id, name, score)
+}
+```

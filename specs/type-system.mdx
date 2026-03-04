@@ -1,0 +1,443 @@
+---
+title: 'Type System'
+description: 'Formal type definitions, constraints, and schema language'
+icon: 'brackets-curly'
+---
+
+## Overview
+
+The GLYPH type system provides formal definitions for all supported data types, including primitive types, collection types, and user-defined structures. This specification defines the type grammar, constraint system, and schema language.
+
+## Primitive Types
+
+### Core Types
+
+| Type | Description | Wire Format | Examples |
+|------|-------------|-------------|----------|
+| `str` | UTF-8 string | Bare or quoted | `hello`, `"hello world"` |
+| `int` | Signed 64-bit integer | Decimal | `42`, `-100`, `0` |
+| `float` | IEEE 754 double | Shortest roundtrip | `3.14`, `1e-06`, `1e+15` |
+| `bool` | Boolean | `t` / `f` | `t`, `f` |
+| `null` | Null value | `_` or `∅` | `_` |
+
+### Extended Types
+
+| Type | Description | Wire Format | Examples |
+|------|-------------|-------------|----------|
+| `bytes` | Binary data | Base64-encoded | `b64"SGVsbG8="` |
+| `time` | Timestamp | ISO-8601 | `2025-01-13T12:00:00Z` |
+| `id` | Typed reference | Prefix + value | `^user:abc123`, `^org:acme` |
+| `blob` | Large binary reference | Content-addressed | `blob:sha256:abc123...` |
+
+### Type Properties
+
+**Integer (`int`):**
+- Range: -2^63 to 2^63-1
+- No leading zeros (except `0`)
+- Decimal representation only (no hex/octal)
+
+**Float (`float`):**
+- IEEE 754 double precision
+- Exponent notation for `exp < -4` or `exp >= 15`
+- NaN and Infinity rejected
+- Negative zero canonicalizes to `0`
+
+**String (`str`):**
+- Valid UTF-8 required
+- Bare-safe strings unquoted
+- Quoted strings use minimal escapes
+- No maximum length (implementation limits may apply)
+
+**Timestamp (`time`):**
+- ISO-8601 format with optional timezone
+- Microsecond precision
+- Canonical form uses `Z` for UTC
+
+**ID (`id`):**
+- Format: `^prefix:value`
+- Prefix: 1-12 lowercase letters
+- Value: alphanumeric + `-` + `_`
+- Examples: `^user:123`, `^org:acme-corp`
+
+## Collection Types
+
+### List
+
+**Syntax:** `[` + space-separated elements + `]`
+
+**Properties:**
+- Ordered sequence
+- Heterogeneous (elements can have different types)
+- Zero-indexed
+
+**Examples:**
+```glyph
+[]                    # Empty list
+[1 2 3]              # Homogeneous
+[_ t 42 hello]       # Heterogeneous
+[[1 2] [3 4]]        # Nested
+```
+
+### Map
+
+**Syntax:** `{` + sorted key=value pairs + `}`
+
+**Properties:**
+- Unordered key-value pairs
+- Keys must be strings
+- Keys sorted by UTF-8 byte order in canonical form
+- Values can be any type
+
+**Examples:**
+```glyph
+{}                           # Empty map
+{a=1}                       # Single entry
+{a=1 b=2 c=3}              # Multiple entries
+{name=Alice age=30}        # Mixed values
+{nested={x=1 y=2}}         # Nested maps
+```
+
+### Struct
+
+**Syntax:** `TypeName{field=value ...}` or `TypeName:version{...}`
+
+**Properties:**
+- Named type with versioning
+- Defined fields with types
+- Can be open (accepts unknown fields) or closed
+
+**Examples:**
+```glyph
+User{name=Alice age=30}
+User:v2{name=Alice age=30 email=alice@example.com}
+Point{x=1.5 y=2.3}
+```
+
+## Type Constraints
+
+### Integer Constraints
+
+**Syntax:** `int<min,max>`
+
+**Examples:**
+```glyph
+port int<1024,65535>        # Valid port number
+limit int<1,100>            # Pagination limit
+age int<0,150>              # Human age
+```
+
+### String Constraints
+
+**Syntax:** `str<minlen,maxlen>`
+
+**Examples:**
+```glyph
+query str<1,500>            # Non-empty, max 500 chars
+username str<3,20>          # Username length
+password str<8,128>         # Password requirements
+```
+
+**Pattern Constraints:**
+
+```glyph
+email str pattern="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+slug str pattern="^[a-z0-9-]+$"
+```
+
+### Enum Constraints
+
+**Syntax:** `enum[value1,value2,...]`
+
+**Examples:**
+```glyph
+status enum[pending,active,complete,failed]
+units enum[celsius,fahrenheit,kelvin]
+role enum[admin,editor,viewer]
+```
+
+### List Constraints
+
+**Syntax:** `list<type, minlen, maxlen>`
+
+**Examples:**
+```glyph
+tags list<str, 0, 10>       # Up to 10 string tags
+scores list<int, 1, 100>    # At least 1 score
+```
+
+### Map Constraints
+
+**Syntax:** `map<keytype, valuetype>`
+
+**Examples:**
+```glyph
+metadata map<str, str>              # String to string
+scores map<str, int>                # String keys, int values
+config map<str, Config>             # String keys, struct values
+```
+
+## Schema Language
+
+### Schema Definition
+
+**Syntax:**
+```glyph
+TypeName:version [annotation] struct {
+    fieldName: type [constraints]
+    ...
+}
+```
+
+**Annotations:**
+- `@open` - Accept unknown fields
+- `@packed` - Use compact encoding
+- `@deprecated` - Mark as deprecated
+
+### Example Schema
+
+```glyph
+User:v1 struct {
+    id: id
+    name: str<1,100>
+    email: str pattern="^[^@]+@[^@]+$"
+    age: int<0,150>
+    roles: list<enum[admin,editor,viewer], 1, 10>
+    metadata: map<str, str>
+    created: time
+}
+
+Config:v1 @open struct {
+    name: str<1,50>
+    port: int<1024,65535>
+    settings: map<str, int>
+}
+
+SearchRequest:v1 struct {
+    query: str<1,500>
+    max_results: int<1,100> = 10
+    filters: map<str, str>
+}
+```
+
+### Field Definitions
+
+**Required fields:**
+```glyph
+name: str               # Must be present
+```
+
+**Optional fields:**
+```glyph
+description: str?       # May be null or absent
+```
+
+**Default values:**
+```glyph
+max_results: int = 10   # Uses 10 if not provided
+active: bool = t        # Defaults to true
+```
+
+### Type References
+
+**Primitive references:**
+```glyph
+field: str
+field: int
+field: bool
+```
+
+**Struct references:**
+```glyph
+address: Address        # Reference to Address struct
+owner: User:v2          # Reference to specific version
+```
+
+**Nested references:**
+```glyph
+metadata: map<str, Metadata>
+users: list<User>
+config: Config?
+```
+
+## Validation
+
+### Type Validation
+
+Type validation ensures values match their declared types:
+
+```go
+// Define schema
+schema := NewSchemaBuilder().
+    AddStruct("User", "v1",
+        Field("name", PrimitiveType("str")),
+        Field("age", PrimitiveType("int")),
+    ).
+    Build()
+
+// Validate value
+value := Struct("User", "v1",
+    Field("name", Str("Alice")),
+    Field("age", Int(30)),
+)
+
+result := schema.Validate(value)
+if !result.Valid {
+    for _, err := range result.Errors {
+        log.Println(err)
+    }
+}
+```
+
+### Constraint Validation
+
+Constraints are checked during validation:
+
+**Integer bounds:**
+```glyph
+age: int<0,150>
+
+# Valid: 30
+# Invalid: -5, 200
+```
+
+**String length:**
+```glyph
+username: str<3,20>
+
+# Valid: "alice", "bob123"
+# Invalid: "ab", "verylongusernamethatexceedslimit"
+```
+
+**Enum membership:**
+```glyph
+status: enum[pending,active,complete]
+
+# Valid: pending, active, complete
+# Invalid: running, done
+```
+
+### Strict vs Loose Validation
+
+**Loose validation:**
+- Unknown fields in `@open` structs: warning
+- Missing optional fields: allowed
+- Type coercion: allowed (e.g., int to float)
+
+**Strict validation:**
+- Unknown fields: error (even in `@open` structs)
+- All declared fields must be present
+- No type coercion
+
+```go
+// Loose validation
+result := ValidateWithSchema(value, schema)
+
+// Strict validation
+result := ValidateStrict(value, schema)
+```
+
+## Schema Evolution
+
+### Versioning
+
+Schemas support versioning for backward compatibility:
+
+```glyph
+User:v1 struct {
+    name: str
+    age: int
+}
+
+User:v2 struct {
+    name: str
+    age: int
+    email: str?          # New optional field
+}
+```
+
+### Compatibility Rules
+
+**Backward compatible changes:**
+- Add optional fields
+- Add default values
+- Make required field optional
+- Expand enum values
+- Relax constraints (widen ranges)
+
+**Breaking changes:**
+- Remove fields
+- Change field types
+- Add required fields
+- Remove enum values
+- Tighten constraints
+
+### Migration Strategies
+
+**Version negotiation:**
+```glyph
+# Client sends supported versions
+Request{versions=[v1 v2 v3]}
+
+# Server responds with chosen version
+Response{version=v2 data=User:v2{...}}
+```
+
+**Graceful degradation:**
+```go
+// Try latest version first
+value, err := ParseAs(data, "User:v3")
+if err != nil {
+    // Fall back to v2
+    value, err = ParseAs(data, "User:v2")
+}
+```
+
+## Type System Grammar
+
+### BNF Definition
+
+```bnf
+type        ::= primitive | collection | reference | constrained
+primitive   ::= "str" | "int" | "float" | "bool" | "null" | "bytes" | "time" | "id"
+collection  ::= "list" | "map" | "struct"
+reference   ::= TypeName [":" version]
+constrained ::= type "<" constraints ">"
+
+constraints ::= intConstraints | strConstraints | enumConstraints | collConstraints
+intConstraints ::= min "," max
+strConstraints ::= minlen "," maxlen | "pattern=" pattern
+enumConstraints ::= value ("," value)*
+collConstraints ::= type "," minlen "," maxlen
+
+schema      ::= TypeName ":" version annotation* "struct" "{" field* "}"
+field       ::= name ":" type ("?" | "=" default)?
+annotation  ::= "@" name
+```
+
+## Conformance
+
+### Implementation Requirements
+
+A conformant type system implementation MUST:
+
+1. Support all primitive types
+2. Support all collection types
+3. Enforce type constraints during validation
+4. Support schema versioning
+5. Provide strict and loose validation modes
+6. Handle unknown fields according to `@open` annotation
+7. Validate nested types recursively
+8. Report validation errors with field paths
+
+### Cross-Language Compatibility
+
+All implementations MUST:
+- Accept identical valid inputs
+- Reject identical invalid inputs
+- Report compatible error messages
+- Support the same constraint syntax
+
+## Related Documentation
+
+- [Loose Mode Specification](/specs/loose-mode) - Canonical rules and JSON bridge
+- [GS1 Protocol](/specs/gs1-protocol) - Stream framing and state verification

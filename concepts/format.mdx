@@ -1,0 +1,395 @@
+---
+title: 'GLYPH Format'
+description: 'Understanding GLYPH syntax, type system, and canonical form'
+icon: 'code'
+---
+
+GLYPH is a token-efficient serialization format designed for AI agents. It eliminates JSON's redundant syntax while maintaining human readability.
+
+## Core Syntax
+
+### Scalars
+
+GLYPH supports six primitive types:
+
+<CodeGroup>
+```glyph Null
+_        // Preferred
+∅        // Unicode alternative (input only)
+```
+
+```glyph Boolean
+t        // true
+f        // false
+```
+
+```glyph Integer
+42
+-100
+0
+```
+
+```glyph Float
+3.14
+1e-06    // Scientific notation
+1e+15
+```
+
+```glyph String
+hello           // Bare (no quotes)
+"hello world"   // Quoted (with spaces)
+src/main.go     // Slashes allowed
+user_id-123     // Underscores and hyphens
+```
+</CodeGroup>
+
+<Info>
+GLYPH uses `_` for null (not `null`), `t`/`f` for booleans (not `true`/`false`), and allows bare strings when safe.
+</Info>
+
+### Collections
+
+<Tabs>
+  <Tab title="Lists">
+    Lists use space-separated elements:
+    
+    ```glyph
+    []                    // Empty
+    [1 2 3]              // Numbers
+    [_ t 42 hello]       // Mixed types
+    [[1 2] [3 4] [5 6]]  // Nested
+    ```
+    
+    <Note>No commas between elements</Note>
+  </Tab>
+  
+  <Tab title="Maps">
+    Maps use `=` and sorted keys:
+    
+    ```glyph
+    {}                           // Empty
+    {a=1}                       // Single entry
+    {name=Alice age=30 active=t} // Multiple fields
+    {x={y={z=42}}}              // Nested
+    ```
+    
+    <Warning>Keys are always sorted by UTF-8 byte order</Warning>
+  </Tab>
+  
+  <Tab title="Structs">
+    Structs have type names:
+    
+    ```glyph
+    User{name=Alice age=30}
+    Point{x=10 y=20}
+    Result{status=success data=[1 2 3]}
+    ```
+    
+    Structs enable schema validation.
+  </Tab>
+</Tabs>
+
+## JSON vs GLYPH
+
+Here's a side-by-side comparison:
+
+<CodeGroup>
+```json JSON (58 tokens)
+{
+  "action": "search",
+  "query": "weather in NYC",
+  "max_results": 10
+}
+```
+
+```glyph GLYPH (34 tokens)
+{action=search query="weather in NYC" max_results=10}
+```
+</CodeGroup>
+
+**Token savings: 41%**
+
+### Syntax Differences
+
+| Feature | JSON | GLYPH | Tokens Saved |
+|---------|------|-------|-------------|
+| Key quotes | `"key":` | `key=` | 2 per key |
+| Separator | `:` | `=` | Same |
+| Delimiter | `,` | space | 1 per field |
+| Booleans | `true`/`false` | `t`/`f` | 2-3 per value |
+| Null | `null` | `_` | 3 per value |
+
+## Bare String Rules
+
+A string can be written without quotes if:
+
+1. **Non-empty**
+2. **First character**: Unicode letter or `_`
+3. **Remaining characters**: Unicode letter, digit, `_`, `-`, `.`, `/`
+4. **Not a reserved word**: `t`, `f`, `true`, `false`, `null`, `none`, `nil`
+
+Otherwise, use double quotes with minimal escaping.
+
+<CodeGroup>
+```glyph Bare-safe strings
+hello
+hello_world
+hello-2.0
+file.txt
+src/main.go
+```
+
+```glyph Requires quotes
+"hello world"     // Space
+"123abc"          // Starts with digit
+"true"            // Reserved word
+"user@email.com"  // @ not allowed
+```
+</CodeGroup>
+
+## Canonical Form
+
+GLYPH has a deterministic canonical form, crucial for hashing and state verification.
+
+### Float Formatting
+
+<Tabs>
+  <Tab title="Rules">
+    - **Zero**: Always `0` (not `-0` or `0.0`)
+    - **Threshold**: Use exponent when `exp < -4` or `exp >= 15`
+    - **Format**: 2-digit minimum exponent (`1e-06`, not `1e-6`)
+    - **Rejected**: NaN and Infinity (not JSON-compatible)
+  </Tab>
+  
+  <Tab title="Examples">
+    ```glyph
+    0.000001              →  1e-06
+    100000000000000       →  1e+14
+    0.0001                →  0.0001  (no exponent)
+    10000000000000000     →  1e+16  (exponent)
+    -0                    →  0      (normalized)
+    ```
+  </Tab>
+</Tabs>
+
+### Key Ordering
+
+Map keys are sorted by **bytewise UTF-8 comparison**:
+
+```glyph
+Input:  {"b":1,"a":2,"aa":3,"A":4,"_":5}
+Output: {A=4 _=5 a=2 aa=3 b=1}
+```
+
+UTF-8 byte order: `A` (0x41) < `_` (0x5F) < `a` (0x61)
+
+<Info>
+This ensures the same data always produces the same output across all implementations (Go, Python, JavaScript, Rust, C).
+</Info>
+
+### Duplicate Keys
+
+**Last-wins policy**: When duplicate keys exist, the last value is used.
+
+```glyph
+Input:  {"k":1,"k":2,"k":3}
+Output: {k=3}
+```
+
+## Extended Types
+
+GLYPH includes types beyond JSON's capabilities:
+
+<Tabs>
+  <Tab title="References">
+    Typed references with namespace prefixes:
+    
+    ```glyph
+    ^user:abc123
+    ^session:xyz789
+    ^doc:draft-001
+    ```
+    
+    Format: `^<prefix>:<value>`
+  </Tab>
+  
+  <Tab title="Timestamps">
+    ISO-8601 format:
+    
+    ```glyph
+    2025-01-13T12:00:00Z
+    2025-01-13T12:00:00-05:00
+    ```
+  </Tab>
+  
+  <Tab title="Bytes">
+    Base64-encoded binary data:
+    
+    ```glyph
+    b64"SGVsbG8gV29ybGQ="
+    ```
+  </Tab>
+</Tabs>
+
+## LOOSE MODE
+
+LOOSE MODE is GLYPH's schema-optional subset, designed as a drop-in JSON replacement.
+
+### Design Goals
+
+From the [LOOSE_MODE_SPEC](https://github.com/Neumenon/glyph/blob/main/docs/LOOSE_MODE_SPEC.md):
+
+1. **Drop-in JSON replacement** - Any valid JSON is valid input
+2. **Deterministic canonical form** - Same data → same output
+3. **Cross-language parity** - Go, JS, Python produce identical output
+4. **Token efficiency** - More compact than JSON
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="JSON Compatible" icon="arrow-right-arrow-left">
+    Accept any JSON, emit valid JSON. Perfect round-trip.
+  </Card>
+  
+  <Card title="Deterministic" icon="fingerprint">
+    SHA-256 hashing for state verification and conflict detection.
+  </Card>
+  
+  <Card title="Compact" icon="compress">
+    40-60% fewer tokens than JSON for typical data.
+  </Card>
+  
+  <Card title="Cross-language" icon="globe">
+    Byte-identical output across all implementations.
+  </Card>
+</CardGroup>
+
+### Usage Examples
+
+<CodeGroup>
+```python Python
+import glyph
+
+# JSON to GLYPH
+data = {"action": "search", "query": "AI agents", "limit": 5}
+glyph_str = glyph.json_to_glyph(data)
+# Result: {action=search limit=5 query="AI agents"}
+
+# GLYPH to JSON
+original = glyph.glyph_to_json(glyph_str)
+```
+
+```go Go
+import "github.com/Neumenon/glyph/glyph"
+
+jsonData := map[string]interface{}{
+    "status": "active",
+    "count":  42,
+}
+v := glyph.FromJSONLoose(jsonData)
+glyphText := glyph.CanonicalizeLoose(v)
+// {count=42 status=active}
+```
+
+```typescript TypeScript
+import { fromJSON, emit, toJSON } from 'glyph-js';
+
+const data = { name: 'Alice', scores: [95, 87, 92] };
+const glyphText = emit(fromJSON(data));
+// {name=Alice scores=[95 87 92]}
+
+const original = toJSON(parse(glyphText));
+```
+</CodeGroup>
+
+## Type System
+
+GLYPH supports constraints for validation:
+
+### Integer Constraints
+
+```glyph
+limit int<1,100>        // min=1, max=100
+port int<1024,65535>    // Valid port range
+age int<0,150>          // Reasonable age
+```
+
+### String Constraints
+
+```glyph
+query str<1,500>        // min_len=1, max_len=500
+username str<3,20>      // Username length
+email str<5,255>        // Email length
+```
+
+### Enum Constraints
+
+```glyph
+units enum[celsius,fahrenheit]
+status enum[pending,active,complete,failed]
+mode enum[read,write,admin]
+```
+
+## Real-World Example
+
+Here's a complex nested structure:
+
+<CodeGroup>
+```json JSON (456 tokens)
+{
+  "user": {
+    "id": "usr_123",
+    "name": "Alice Johnson",
+    "email": "alice@example.com",
+    "active": true,
+    "roles": ["admin", "user"],
+    "metadata": {
+      "created": "2025-01-01T00:00:00Z",
+      "last_login": "2025-01-13T12:00:00Z",
+      "login_count": 142
+    }
+  },
+  "permissions": [
+    {"resource": "users", "actions": ["read", "write"]},
+    {"resource": "posts", "actions": ["read"]}
+  ]
+}
+```
+
+```glyph GLYPH (267 tokens)
+{permissions=[{actions=[read write] resource=users} {actions=[read] resource=posts}] user={active=t email=alice@example.com id=usr_123 metadata={created=2025-01-01T00:00:00Z last_login=2025-01-13T12:00:00Z login_count=142} name="Alice Johnson" roles=[admin user]}}
+```
+</CodeGroup>
+
+**Token reduction: 41%** (189 tokens saved)
+
+## Summary
+
+<Check>**GLYPH Format Benefits**</Check>
+
+- **40-60% fewer tokens** than JSON
+- **Deterministic canonical form** for hashing
+- **Human-readable** text format
+- **Cross-language compatible** (Go, Python, JS, Rust, C)
+- **Drop-in JSON replacement** (LOOSE MODE)
+- **Rich type system** with constraints
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Token Savings" icon="coins" href="/concepts/token-savings">
+    Learn how GLYPH reduces token usage
+  </Card>
+  
+  <Card title="Streaming Validation" icon="bolt" href="/concepts/streaming-validation">
+    Validate as tokens stream from LLMs
+  </Card>
+  
+  <Card title="Tabular Mode" icon="table" href="/concepts/tabular-mode">
+    Compress homogeneous lists automatically
+  </Card>
+  
+  <Card title="LOOSE MODE Spec" icon="file-lines" href="https://github.com/Neumenon/glyph/blob/main/docs/LOOSE_MODE_SPEC.md">
+    Complete technical specification
+  </Card>
+</CardGroup>

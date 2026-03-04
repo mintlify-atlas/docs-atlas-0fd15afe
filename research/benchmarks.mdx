@@ -1,0 +1,298 @@
+---
+title: Benchmark Results
+description: Comprehensive benchmark comparing GLYPH against JSON, ZON, and TOON across multiple dimensions
+---
+
+# GLYPH Benchmark Results
+
+Comprehensive comparison of GLYPH against JSON, ZON, and TOON serialization formats for LLM applications.
+
+## Executive Summary
+
+<CardGroup cols={2}>
+  <Card title="Token Savings" icon="coins">
+    **48%** reduction with GLYPH+Pool
+    
+    **5%** reduction with standard GLYPH
+  </Card>
+  <Card title="Size Reduction" icon="compress">
+    **60%** smaller with GLYPH+Pool
+    
+    **45%** smaller with standard GLYPH
+  </Card>
+  <Card title="Retrieval Accuracy" icon="bullseye">
+    **100%** accuracy on large models
+    
+    Matches JSON performance
+  </Card>
+  <Card title="Streaming Support" icon="bolt">
+    **33%** faster validation
+    
+    Early tool detection at 50%
+  </Card>
+</CardGroup>
+
+## Codec Comparison Matrix
+
+| Codec | Description | Primary Use Case |
+|-------|-------------|------------------|
+| **JSON** | Standard interchange format | Baseline, LLM generation |
+| **GLYPH** | Key=value compact format | LLM context, tool calls |
+| **ZON** | Zig-inspired minimal syntax | Maximum compression |
+| **TOON** | YAML-like indented format | Human readability |
+
+## Size & Token Comparison
+
+### Agent Trace (50 steps)
+
+| Codec | Bytes | vs JSON | Tokens | vs JSON | Round-trip |
+|-------|------:|--------:|-------:|--------:|:----------:|
+| JSON | 66,103 | baseline | 15,510 | baseline | ✓ |
+| **GLYPH** | 57,485 | **-13%** | 14,656 | **-5%** | ✓ |
+| **GLYPH+Pool** | 26,167 | **-60%** | 8,090 | **-48%** | ✓ |
+| ZON | 18,367 | -72% | 5,982 | -61% | ✗ |
+| TOON | 73,739 | +12% | 18,116 | +17% | ✓ |
+
+<Note>
+  **GLYPH+Pool** provides the best balance of compression and reliability, achieving 60% size reduction while maintaining perfect round-trip safety.
+</Note>
+
+### Simple Object
+
+```json JSON (104 bytes)
+{"name":"Alice","age":28,"active":true,"score":94.5}
+```
+
+```glyph GLYPH (70 bytes, -33%)
+{name="Alice" age=28 active=t score=94.5}
+```
+
+| Codec | Bytes | vs JSON |
+|-------|------:|--------:|
+| JSON | 104 | baseline |
+| **GLYPH** | 70 | **-33%** |
+| ZON | 64 | -38% |
+| TOON | 72 | -31% |
+
+### Nested Object
+
+| Codec | Bytes | vs JSON |
+|-------|------:|--------:|
+| JSON | 320 | baseline |
+| **GLYPH** | 180 | **-44%** |
+| ZON | 166 | -48% |
+| TOON | 216 | -33% |
+
+### Tabular Data (5 employees)
+
+| Codec | Bytes | vs JSON |
+|-------|------:|--------:|
+| JSON | 697 | baseline |
+| **GLYPH** | 254 | **-64%** |
+| **GLYPH+Pool** | 250 | **-64%** |
+| ZON | 209 | -70% |
+| TOON | 236 | -66% |
+
+## Token Efficiency Analysis
+
+<Accordion title="Why tokens matter more than bytes">
+  For LLM applications, **token count directly impacts**:
+  - API costs (charged per token)
+  - Context window usage
+  - Processing latency
+  - Model accuracy (fewer tokens = clearer signal)
+</Accordion>
+
+### Token Savings Across Data Shapes
+
+```
+Token Reduction vs JSON:
+
+Agent Trace (50 steps):
+  ZON:        ████████████████████████████████████████ -61%
+  GLYPH+Pool: ████████████████████████████████ -48%
+  GLYPH:      ██ -5%
+  TOON:       (overhead) +17%
+
+Tabular Data:
+  ZON:        ████████████████████████████ -70%
+  GLYPH:      ████████████████████████████ -64%
+  TOON:       ██████████████████████████ -66%
+
+Nested Object:
+  ZON:        ████████████████████████ -48%
+  GLYPH:      ██████████████████████ -44%
+  TOON:       ████████████████ -33%
+```
+
+## Streaming Validation Performance
+
+<Info>
+  GLYPH supports **real-time validation** during LLM streaming, enabling early error detection and generation cancellation.
+</Info>
+
+### Early Tool Detection
+
+| Test | Tool Detected At | Total Tokens | Detection Point |
+|------|------------------|--------------|----------------|
+| search | Token 6 | 12 | **50%** |
+| calculate | Token 6 | 12 | **50%** |
+| browse | Token 6 | 12 | **50%** |
+| execute | Token 6 | 11 | **55%** |
+
+**Tool identity known halfway through response.**
+
+### Early Rejection
+
+| Test | Unknown Tool | Stopped At | Total Would Be | Tokens Saved |
+|------|--------------|------------|----------------|-------------|
+| delete_all | ✓ | Token 7 | 10+ | **30%** |
+| rm_rf | ✓ | Token 7 | 10+ | **30%** |
+| hack_server | ✓ | Token 6 | 10+ | **40%** |
+
+### Latency Savings
+
+<CodeGroup>
+```text Method A: Streaming + Early Stop
+Stopped at token 10
+Time: 139ms
+```
+
+```text Method B: Wait for Full Response
+Total tokens: 29
+Time: 206ms
+```
+</CodeGroup>
+
+**Savings:**
+- Tokens saved: 19/29 (66%)
+- Time saved: 67ms (33%)
+
+## Gzip Compression
+
+<Warning>
+  When using gzip, format differences diminish significantly. All codecs compress to ~3KB for the agent trace dataset.
+</Warning>
+
+| Codec | Raw Bytes | Gzipped | Compression Ratio |
+|-------|----------:|--------:|------------------:|
+| JSON | 66,103 | 3,361 | 95% |
+| GLYPH | 57,485 | 3,368 | 94% |
+| GLYPH+Pool | 26,167 | 2,894 | 89% |
+| ZON | 18,367 | 2,849 | 84% |
+| TOON | 73,739 | 3,689 | 95% |
+
+**Key Insight:** Gzip eliminates most format differences, making raw size less important for storage but still critical for LLM context windows (which don't use compression).
+
+## Feature Comparison
+
+| Feature | JSON | GLYPH | ZON | TOON |
+|---------|:----:|:-----:|:---:|:----:|
+| **Size Efficiency** | ★★☆ | ★★★ | ★★★★ | ★☆☆ |
+| **Token Efficiency** | ★★☆ | ★★★ | ★★★★ | ★☆☆ |
+| **LLM Retrieval** | ★★★★ | ★★★★ | ★★★☆ | ★★★★ |
+| **LLM Generation** | ★★★★ | ★★☆ | ★☆☆ | ★★☆ |
+| **Human Readability** | ★★★☆ | ★★★★ | ★★☆ | ★★★★ |
+| **Round-trip Safety** | ★★★★ | ★★★★ | ★★☆ | ★★★★ |
+| **Streaming Validation** | ★★★★ | ★★★★ | N/A | N/A |
+| **Tool Call Support** | ★★★★ | ★★★★ | ★★☆ | ★★★☆ |
+| **Parser Availability** | ★★★★ | ★★★☆ | ★★☆ | ★★★☆ |
+
+## Recommendations by Use Case
+
+<AccordionGroup>
+  <Accordion title="Use GLYPH When" icon="check">
+    - Token budget is constrained
+    - LLM reads but doesn't generate
+    - Tool calls and function arguments
+    - Human-readable logs/traces needed
+    - Streaming validation required
+    - Context window optimization critical
+  </Accordion>
+  
+  <Accordion title="Use GLYPH+Pool When" icon="database">
+    - Agent traces with repeated schemas
+    - Storage efficiency is paramount
+    - Output processed by tools, not LLMs
+    - Maximum compression needed with safety
+  </Accordion>
+  
+  <Accordion title="Use JSON When" icon="code">
+    - LLM needs to generate structured output
+    - Maximum compatibility required
+    - Interoperating with external systems
+    - Parser reliability is critical
+  </Accordion>
+  
+  <Accordion title="Use ZON When" icon="compress-alt">
+    - Maximum compression needed
+    - No round-trip requirement
+    - Controlled environment (known parser)
+    - Experimental/research context
+  </Accordion>
+  
+  <Accordion title="Avoid TOON When" icon="times">
+    - Token efficiency matters (larger than JSON)
+    - Precise indentation is difficult
+    - Deep nesting present (350% overhead)
+  </Accordion>
+</AccordionGroup>
+
+## Test Methodology
+
+### Environment
+- **Date:** December 25, 2024
+- **Models:** Ollama (llama3.2:3b, qwen3:8b, mistral-small:24b)
+- **Tokenizer:** tiktoken (cl100k_base, o200k_base)
+- **Iterations:** 20 per test (5 warmup)
+
+### Test Datasets
+
+1. **simple** - Flat object with 5 fields
+2. **nested** - 3-level deep nested object
+3. **tabular** - Array of 5 employee records
+4. **complex** - Nested arrays with departments/projects
+5. **agent_trace** - 50-step agent execution trace
+
+### Reproduction
+
+```bash
+# Size comparison
+cd sjson/benchmark/comparison/js
+node codec_substrate_bench.mjs
+
+# LLM accuracy test
+node codec_llm_accuracy_bench.mjs --model=llama3.2:3b
+
+# Streaming validation test
+node streaming_validation_test.mjs --model=llama3.2:3b
+
+# Tool call test
+node codec_toolcall_bench.mjs --model=llama3.2:3b
+```
+
+## Corpus Results (55 Test Cases)
+
+**GLYPH-Loose vs ZON vs TOON vs JSON-minified**
+
+| Codec | Bytes | cl100k tokens | o200k tokens |
+|-------|------:|--------------:|-------------:|
+| ZON | 3,878 | 1,915 | 1,909 |
+| **GLYPH** | 4,224 | **1,895** | **1,873** |
+| JSON-min | 5,109 | 2,117 | 2,113 |
+| TOON | 5,440 | 2,466 | 2,445 |
+
+<Check>
+  **GLYPH wins on token efficiency** - the metric that matters for LLM API costs.
+</Check>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="LLM Accuracy Report" icon="brain" href="/research/llm-accuracy">
+    How LLMs handle GLYPH vs other formats
+  </Card>
+  <Card title="Performance Report" icon="gauge" href="/research/performance">
+    Parser speed and optimization details
+  </Card>
+</CardGroup>

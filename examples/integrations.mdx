@@ -1,0 +1,553 @@
+---
+title: 'Framework Integrations'
+description: 'Integrate GLYPH with LangChain, multi-agent frameworks, and custom protocols'
+icon: 'plug'
+---
+
+## LangChain Integration
+
+### GLYPH Output Parser
+
+Create custom output parsers that use GLYPH for more efficient structured outputs:
+
+```python
+import glyph
+from langchain.schema import BaseOutputParser, OutputParserException
+from typing import Any
+
+
+class GlyphOutputParser(BaseOutputParser[dict]):
+    """Parse GLYPH-formatted LLM output."""
+
+    def parse(self, text: str) -> dict:
+        """Parse GLYPH text to dictionary."""
+        try:
+            # Find GLYPH content (may be wrapped in markdown)
+            content = text
+            if "```glyph" in text:
+                start = text.find("```glyph") + 8
+                end = text.find("```", start)
+                content = text[start:end].strip()
+            elif "```" in text:
+                start = text.find("```") + 3
+                end = text.find("```", start)
+                content = text[start:end].strip()
+
+            parsed = glyph.parse(content)
+            return glyph.to_json(parsed)
+
+        except Exception as e:
+            raise OutputParserException(f"Failed to parse GLYPH: {e}")
+
+    def get_format_instructions(self) -> str:
+        return """Return your response in GLYPH format:
+- Use {key=value} for objects
+- Use [item1 item2] for arrays
+- Strings with spaces need quotes: "hello world"
+- Booleans are t/f, null is _
+
+Example: {name=Alice age=30 hobbies=[reading coding]}"""
+
+    @property
+    def _type(self) -> str:
+        return "glyph"
+```
+
+### Structured Output with Pydantic
+
+Combine GLYPH with Pydantic models:
+
+```python
+from langchain.schema import BaseOutputParser
+from pydantic import BaseModel, Field
+from typing import Type
+
+
+class GlyphStructuredParser(BaseOutputParser[BaseModel]):
+    """Parse GLYPH output into a Pydantic model."""
+
+    pydantic_model: Type[BaseModel]
+
+    def parse(self, text: str) -> BaseModel:
+        parser = GlyphOutputParser()
+        data = parser.parse(text)
+        return self.pydantic_model(**data)
+
+    def get_format_instructions(self) -> str:
+        schema = self.pydantic_model.model_json_schema()
+        fields = schema.get("properties", {})
+
+        field_strs = []
+        for name, info in fields.items():
+            type_str = info.get("type", "any")
+            field_strs.append(f"{name}:{type_str}")
+
+        return f"""Return a GLYPH object with these fields:
+{{{' '.join(field_strs)}}}
+
+Example: {{{' '.join(f'{k}=...' for k in fields.keys())}}}"""
+
+    @property
+    def _type(self) -> str:
+        return "glyph_structured"
+
+
+# Usage example
+class MovieRecommendation(BaseModel):
+    title: str = Field(description="Movie title")
+    year: int = Field(description="Release year")
+    genre: str = Field(description="Primary genre")
+    reason: str = Field(description="Why this movie is recommended")
+
+
+parser = GlyphStructuredParser(pydantic_model=MovieRecommendation)
+```
+
+### GLYPH-based LangChain Tools
+
+Create tools that accept GLYPH input:
+
+```python
+from langchain.tools import BaseTool
+from langchain.callbacks.manager import CallbackManagerForToolRun
+from typing import Optional
+
+
+class GlyphTool(BaseTool):
+    """Base class for tools that accept GLYPH input."""
+
+    def _parse_input(self, tool_input: str) -> dict:
+        """Parse GLYPH-formatted tool input."""
+        try:
+            parsed = glyph.parse(tool_input)
+            return glyph.to_json(parsed)
+        except:
+            # Fall back to treating as simple string
+            return {"input": tool_input}
+
+
+class SearchTool(GlyphTool):
+    """Search tool that accepts GLYPH input."""
+
+    name: str = "search"
+    description: str = """Search for information.
+Input format: {query="your search" max_results=10}"""
+
+    def _run(
+        self,
+        tool_input: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None
+    ) -> str:
+        args = self._parse_input(tool_input)
+        query = args.get("query", args.get("input", ""))
+        max_results = args.get("max_results", 5)
+
+        # Your search implementation
+        results = [
+            {"title": f"Result {i}", "snippet": f"Content for {query}..."}
+            for i in range(max_results)
+        ]
+
+        # Return as GLYPH (token-efficient)
+        return glyph.json_to_glyph({"results": results})
+```
+
+### Complete LangChain Chain Example
+
+```python
+from langchain_anthropic import ChatAnthropic
+from langchain.prompts import ChatPromptTemplate
+from langchain.chains import LLMChain
+
+
+def create_glyph_chain():
+    """Create a chain that outputs GLYPH."""
+
+    llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+    parser = GlyphOutputParser()
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a helpful assistant that returns structured data.
+{format_instructions}"""),
+        ("human", "{query}")
+    ])
+
+    chain = LLMChain(
+        llm=llm,
+        prompt=prompt.partial(format_instructions=parser.get_format_instructions()),
+        output_parser=parser,
+    )
+
+    return chain
+
+
+# Usage
+chain = create_glyph_chain()
+result = chain.run(query="List 3 programming languages with their main use cases")
+print(f"Result type: {type(result)}")
+print(f"Result: {result}")
+```
+
+---
+
+## Multi-Agent Frameworks
+
+### Message Bus Pattern
+
+Structured communication between multiple agents:
+
+```python
+import glyph
+from glyph import g, field
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, Any, Callable, Dict
+import asyncio
+
+
+class MessageType(Enum):
+    TASK = "task"
+    RESULT = "result"
+    QUERY = "query"
+    RESPONSE = "response"
+    ERROR = "error"
+    HEARTBEAT = "heartbeat"
+
+
+@dataclass
+class AgentMessage:
+    """Typed message for inter-agent communication."""
+
+    type: MessageType
+    from_agent: str
+    to_agent: str
+    payload: Any
+    correlation_id: Optional[str] = None
+    timestamp: Optional[str] = None
+
+    def to_glyph(self) -> str:
+        return glyph.emit(g.struct("Msg",
+            field("type", g.str(self.type.value)),
+            field("from", g.str(self.from_agent)),
+            field("to", g.str(self.to_agent)),
+            field("payload", glyph.from_json(self.payload)),
+            field("cid", g.str(self.correlation_id) if self.correlation_id else g.null()),
+            field("ts", g.str(self.timestamp) if self.timestamp else g.null()),
+        ))
+
+    @classmethod
+    def from_glyph(cls, text: str) -> "AgentMessage":
+        v = glyph.parse(text)
+        return cls(
+            type=MessageType(v.get("type").as_str()),
+            from_agent=v.get("from").as_str(),
+            to_agent=v.get("to").as_str(),
+            payload=glyph.to_json(v.get("payload")),
+            correlation_id=v.get("cid").as_str() if v.get("cid") and not v.get("cid").is_null() else None,
+            timestamp=v.get("ts").as_str() if v.get("ts") and not v.get("ts").is_null() else None,
+        )
+
+
+class AgentBus:
+    """Message bus for multi-agent communication."""
+
+    def __init__(self):
+        self.agents: dict[str, asyncio.Queue] = {}
+        self.handlers: dict[str, Any] = {}
+
+    def register(self, agent_id: str, handler):
+        """Register an agent with its message handler."""
+        self.agents[agent_id] = asyncio.Queue()
+        self.handlers[agent_id] = handler
+
+    async def send(self, msg: AgentMessage):
+        """Send message to target agent."""
+        if msg.to_agent not in self.agents:
+            raise ValueError(f"Unknown agent: {msg.to_agent}")
+
+        await self.agents[msg.to_agent].put(msg)
+
+    async def broadcast(self, from_agent: str, payload: Any, msg_type: MessageType = MessageType.QUERY):
+        """Broadcast to all other agents."""
+        for agent_id in self.agents:
+            if agent_id != from_agent:
+                msg = AgentMessage(
+                    type=msg_type,
+                    from_agent=from_agent,
+                    to_agent=agent_id,
+                    payload=payload,
+                )
+                await self.send(msg)
+
+    async def run_agent(self, agent_id: str):
+        """Run agent message loop."""
+        queue = self.agents[agent_id]
+        handler = self.handlers[agent_id]
+
+        while True:
+            msg = await queue.get()
+            try:
+                response = await handler(msg)
+                if response:
+                    await self.send(response)
+            except Exception as e:
+                error_msg = AgentMessage(
+                    type=MessageType.ERROR,
+                    from_agent=agent_id,
+                    to_agent=msg.from_agent,
+                    payload={"error": str(e)},
+                    correlation_id=msg.correlation_id,
+                )
+                await self.send(error_msg)
+```
+
+### Example Multi-Agent System
+
+```python
+# Define agent handlers
+async def researcher_agent(msg: AgentMessage) -> Optional[AgentMessage]:
+    """Agent that handles research tasks."""
+    if msg.type == MessageType.TASK:
+        query = msg.payload.get("query", "")
+        # Simulate research
+        results = [
+            {"title": f"Result 1 for {query}", "relevance": 0.95},
+            {"title": f"Result 2 for {query}", "relevance": 0.87},
+        ]
+
+        return AgentMessage(
+            type=MessageType.RESULT,
+            from_agent="researcher",
+            to_agent=msg.from_agent,
+            payload={"results": results},
+            correlation_id=msg.correlation_id,
+        )
+    return None
+
+
+async def writer_agent(msg: AgentMessage) -> Optional[AgentMessage]:
+    """Agent that handles writing tasks."""
+    if msg.type == MessageType.TASK:
+        topic = msg.payload.get("topic", "")
+        # Simulate writing
+        content = f"Article about {topic}..."
+
+        return AgentMessage(
+            type=MessageType.RESULT,
+            from_agent="writer",
+            to_agent=msg.from_agent,
+            payload={"content": content, "word_count": len(content.split())},
+            correlation_id=msg.correlation_id,
+        )
+    return None
+
+
+# Run the system
+async def demo_multi_agent():
+    bus = AgentBus()
+
+    # Register agents
+    bus.register("researcher", researcher_agent)
+    bus.register("writer", writer_agent)
+
+    # Start agent loops
+    tasks = [
+        asyncio.create_task(bus.run_agent("researcher")),
+        asyncio.create_task(bus.run_agent("writer")),
+    ]
+
+    # Send tasks
+    await bus.send(AgentMessage(
+        type=MessageType.TASK,
+        from_agent="coordinator",
+        to_agent="researcher",
+        payload={"query": "GLYPH serialization"},
+        correlation_id="task_1",
+    ))
+
+    # Let messages process
+    await asyncio.sleep(0.1)
+```
+
+---
+
+## Custom Wire Protocols
+
+### Custom Protocol over WebSocket
+
+Build a custom agent-to-server protocol:
+
+```python
+import glyph
+from glyph import g, field
+from enum import IntEnum
+from typing import Optional, Any
+
+
+class MessageKind(IntEnum):
+    """Message kinds for custom protocol."""
+    DATA = 0
+    ACK = 1
+    ERROR = 2
+    PING = 3
+    PONG = 4
+    AUTH = 100
+    AUTH_OK = 101
+    AUTH_FAIL = 102
+    SUBSCRIBE = 110
+    PUBLISH = 112
+    RPC_REQUEST = 120
+    RPC_RESPONSE = 121
+
+
+class CustomProtocol:
+    """Custom protocol built on GLYPH messages."""
+
+    def __init__(self):
+        self.authenticated = False
+        self.subscriptions: set[str] = set()
+        self._seq = 0
+        self.outbox: list[str] = []
+
+    def _next_seq(self) -> int:
+        self._seq += 1
+        return self._seq
+
+    def _send(self, kind: MessageKind, payload: Any):
+        """Queue a message to send."""
+        msg = glyph.emit(g.struct("Msg",
+            field("seq", g.int(self._next_seq())),
+            field("kind", g.int(kind)),
+            field("payload", glyph.from_json(payload) if payload else g.null()),
+        ))
+        self.outbox.append(msg)
+
+    def authenticate(self, credentials: dict):
+        """Send authentication request."""
+        self._send(MessageKind.AUTH, credentials)
+
+    def subscribe(self, topic: str):
+        """Subscribe to a topic."""
+        self._send(MessageKind.SUBSCRIBE, {"topic": topic})
+        self.subscriptions.add(topic)
+
+    def publish(self, topic: str, message: Any):
+        """Publish message to topic."""
+        self._send(MessageKind.PUBLISH, {"topic": topic, "msg": message})
+
+    def call_rpc(self, method: str, params: dict) -> str:
+        """Call a remote procedure."""
+        rpc_id = f"rpc_{self._seq}"
+        self._send(MessageKind.RPC_REQUEST, {
+            "id": rpc_id,
+            "method": method,
+            "params": params,
+        })
+        return rpc_id
+```
+
+### Protocol Usage Example
+
+```python
+import asyncio
+import websockets
+
+
+async def client_example():
+    protocol = CustomProtocol()
+
+    async with websockets.connect("ws://localhost:8765") as ws:
+        # Authenticate
+        protocol.authenticate({"token": "abc123"})
+
+        # Send queued messages
+        for msg in protocol.outbox:
+            await ws.send(msg)
+        protocol.outbox.clear()
+
+        # Subscribe to topics
+        protocol.subscribe("agent-updates")
+        await ws.send(protocol.outbox.pop())
+
+        # Make RPC call
+        rpc_id = protocol.call_rpc("process_data", {"input": [1, 2, 3]})
+        await ws.send(protocol.outbox.pop())
+
+        # Receive responses
+        async for message in ws:
+            parsed = glyph.parse(message)
+            kind = MessageKind(parsed.get("kind").as_int())
+
+            if kind == MessageKind.AUTH_OK:
+                protocol.authenticated = True
+                print("Authenticated!")
+
+            elif kind == MessageKind.RPC_RESPONSE:
+                payload = glyph.to_json(parsed.get("payload"))
+                print(f"RPC result: {payload}")
+
+            elif kind == MessageKind.ERROR:
+                payload = glyph.to_json(parsed.get("payload"))
+                print(f"Error: {payload}")
+```
+
+---
+
+## REST API Integration
+
+### GLYPH as API Format
+
+Use GLYPH for token-efficient API responses:
+
+```python
+from flask import Flask, request, Response
+import glyph
+
+app = Flask(__name__)
+
+
+@app.route('/api/search', methods=['POST'])
+def search():
+    # Parse GLYPH request
+    data = glyph.glyph_to_json(request.data.decode())
+    query = data.get('query')
+    limit = data.get('limit', 10)
+
+    # Process request
+    results = perform_search(query, limit)
+
+    # Return GLYPH response (more efficient than JSON)
+    response_data = glyph.json_to_glyph({
+        'query': query,
+        'count': len(results),
+        'results': results
+    })
+
+    return Response(response_data, mimetype='application/glyph')
+
+
+@app.route('/api/agent/state/<agent_id>', methods=['GET'])
+def get_agent_state(agent_id):
+    state = load_agent_state(agent_id)
+    return Response(
+        glyph.json_to_glyph(state),
+        mimetype='application/glyph'
+    )
+```
+
+<Tip>
+**Integration Tips**
+- Use GLYPH for token-sensitive AI-to-AI communication
+- Keep JSON for human-facing APIs and debugging
+- Implement content negotiation to support both formats
+- Monitor token savings with analytics
+</Tip>
+
+<Check>
+**Integration Checklist**
+- [ ] Add GLYPH output parser to your LLM framework
+- [ ] Create tool wrappers that accept GLYPH input
+- [ ] Implement message serialization for agent communication
+- [ ] Add content type negotiation for API endpoints
+- [ ] Set up monitoring for token efficiency gains
+</Check>

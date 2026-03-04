@@ -1,0 +1,603 @@
+---
+title: Go SDK
+description: GLYPH codec for Go - token-optimized LLM-friendly serialization
+---
+
+## Installation
+
+```bash
+go get github.com/glyph-lang/glyph/go/glyph
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/glyph-lang/glyph/go/glyph"
+)
+
+func main() {
+	// Parse GLYPH text
+	result, err := glyph.Parse("{action=search query=test}")
+	if err != nil {
+		panic(err)
+	}
+	
+	value := result.Value
+	action := value.Get("action").AsStr()
+	fmt.Println(action) // "search"
+	
+	// Emit as GLYPH
+	team := glyph.Struct("Team",
+		glyph.Field("name", glyph.Str("Arsenal")),
+		glyph.Field("rank", glyph.Int(1)),
+	)
+	
+	text := glyph.CanonicalizeLoose(team)
+	fmt.Println(text)
+	// Output: {name=Arsenal rank=1}
+}
+```
+
+## Core API
+
+### Parsing
+
+```go
+import "github.com/glyph-lang/glyph/go/glyph"
+
+// Parse with tolerant mode (auto-corrects LLM mistakes)
+result, err := glyph.Parse("{name=Alice age=30}")
+if err != nil {
+	return err
+}
+
+value := result.Value
+if result.HasErrors() {
+	// Parse succeeded but with warnings
+	for _, warn := range result.Warnings {
+		fmt.Printf("Warning: %s\n", warn.Message)
+	}
+}
+
+// Parse with schema
+schema := loadSchema()
+result, err = glyph.ParseWithSchema(input, schema)
+
+// Parse with options
+result, err = glyph.ParseWithOptions(input, glyph.ParseOptions{
+	Schema:   schema,
+	Tolerant: true,
+})
+```
+
+### Emission
+
+```go
+// Canonical form (default: auto-tabular enabled)
+text := glyph.CanonicalizeLoose(value)
+
+// Without auto-tabular (v2.2.x compatibility)
+text = glyph.CanonicalizeLooseNoTabular(value)
+
+// With custom options
+text = glyph.CanonicalizeLooseWithOpts(value, glyph.DefaultLooseCanonOpts())
+```
+
+### JSON Bridge
+
+```go
+import "encoding/json"
+
+// JSON → GValue
+jsonData := map[string]interface{}{
+	"action": "search",
+	"query":  "weather",
+	"max_results": 10,
+}
+value := glyph.FromJSONLoose(jsonData)
+
+// GValue → JSON
+jsonBack := glyph.ToJSONLoose(value)
+
+// Parse JSON string
+result, err := glyph.ParseJSONLoose(`{"x": 1, "y": 2}`)
+if err != nil {
+	return err
+}
+
+// Stringify to JSON
+jsonStr := glyph.StringifyJSONLoose(value)
+```
+
+## Building Values
+
+### Value Constructors
+
+```go
+import "github.com/glyph-lang/glyph/go/glyph"
+
+// Scalars
+nullVal := glyph.Null()
+boolVal := glyph.Bool(true)
+intVal := glyph.Int(42)
+floatVal := glyph.Float(3.14)
+strVal := glyph.Str("hello")
+bytesVal := glyph.Bytes([]byte{1, 2, 3})
+timeVal := glyph.Time(time.Now())
+idVal := glyph.ID("user", "123") // ^user:123
+
+// Lists
+list := glyph.List(
+	glyph.Int(1),
+	glyph.Int(2),
+	glyph.Int(3),
+)
+
+// Maps
+map_ := glyph.Map(
+	glyph.Entry("name", glyph.Str("Alice")),
+	glyph.Entry("age", glyph.Int(30)),
+)
+
+// Structs (typed objects)
+team := glyph.Struct("Team",
+	glyph.Field("id", glyph.ID("t", "ARS")),
+	glyph.Field("name", glyph.Str("Arsenal")),
+	glyph.Field("rank", glyph.Int(1)),
+)
+
+// Sum types (tagged unions)
+result := glyph.Sum("Ok", glyph.Str("success"))
+error := glyph.Sum("Err", glyph.Str("not found"))
+```
+
+### Helper Functions
+
+```go
+// Field is an alias for MapEntry
+field := glyph.Field("key", value)
+
+// Entry creates a MapEntry
+entry := glyph.Entry("key", value)
+```
+
+## Accessing Values
+
+```go
+value, err := glyph.Parse("{name=Alice age=30 active=t}")
+if err != nil {
+	return err
+}
+
+gval := value.Value
+
+// Type checking
+if gval.Type() == glyph.TypeMap {
+	fmt.Println("It's a map!")
+}
+
+// Get nested values
+name := gval.Get("name").AsStr()   // "Alice"
+age := gval.Get("age").AsInt()    // 30
+active := gval.Get("active").AsBool() // true
+
+// Safe access with nil checks
+rank := gval.Get("rank")
+if rank != nil && !rank.IsNull() {
+	fmt.Println(rank.AsInt())
+}
+
+// Lists
+scores, _ := glyph.Parse("[95 87 92]")
+for _, item := range scores.Value.AsList() {
+	fmt.Println(item.AsInt())
+}
+
+// Structs
+team, _ := glyph.Parse("Team{name=Arsenal rank=1}")
+structVal := team.Value.AsStruct()
+fmt.Println(structVal.TypeName) // "Team"
+for _, field := range structVal.Fields {
+	fmt.Printf("%s: %v\n", field.Key, field.Value)
+}
+```
+
+## Canonicalization Options
+
+```go
+import "github.com/glyph-lang/glyph/go/glyph"
+
+// Default: auto-tabular enabled, _ for null
+opts := glyph.DefaultLooseCanonOpts()
+
+// LLM-optimized (ASCII-safe null, single token)
+opts = glyph.LLMLooseCanonOpts()
+
+// Pretty (human-readable with ∅ symbol)
+opts = glyph.PrettyLooseCanonOpts()
+
+// No auto-tabular (backward compatibility)
+opts = glyph.NoTabularLooseCanonOpts()
+
+// Custom options
+opts = glyph.LooseCanonOpts{
+	AutoTabular:  true,
+	MinRows:      3,
+	MaxCols:      64,
+	AllowMissing: true,
+	NullStyle:    glyph.NullStyleUnderscore, // or NullStyleSymbol
+}
+
+data := []map[string]interface{}{
+	{"id": "doc_1", "score": 0.95},
+	{"id": "doc_2", "score": 0.89},
+	{"id": "doc_3", "score": 0.84},
+}
+
+value := glyph.FromJSONLoose(data)
+text := glyph.CanonicalizeLooseWithOpts(value, opts)
+fmt.Println(text)
+// @tab _ rows=3 cols=2 [id score]
+// |doc_1|0.95|
+// |doc_2|0.89|
+// |doc_3|0.84|
+// @end
+```
+
+## Comparison and Hashing
+
+```go
+v1, _ := glyph.Parse("{x=1 y=2}")
+v2, _ := glyph.Parse("{y=2 x=1}") // Different order
+
+// Semantic equality (order-independent for maps)
+if glyph.EqualLoose(v1.Value, v2.Value) {
+	fmt.Println("Equal!")
+}
+
+// Fingerprinting for deduplication
+fp1 := glyph.FingerprintLoose(v1.Value)
+fp2 := glyph.FingerprintLoose(v2.Value)
+if fp1 == fp2 {
+	fmt.Println("Same fingerprint")
+}
+```
+
+## Schema Definition
+
+```go
+import "github.com/glyph-lang/glyph/go/glyph"
+
+// Parse schema from GLYPH
+schemaText := `
+@schema{
+  Team:v1 struct {
+    id: id        @k(t)
+    name: str     @k(n)
+    league: str   @k(l) [optional]
+  }
+
+  Match:v1 struct {
+    id: id        @k(m)
+    home: Team    @k(H)
+    away: Team    @k(A)
+    kickoff: time @k(k)
+  }
+}
+`
+
+schema, err := glyph.ParseSchema(schemaText)
+if err != nil {
+	return err
+}
+
+// Use schema for parsing
+result, err := glyph.ParseWithSchema(input, schema)
+```
+
+## Tabular Parsing
+
+```go
+// Parse tabular format
+tabularInput := `
+@tab _ rows=3 cols=2 [id score]
+|doc_1|0.95|
+|doc_2|0.89|
+|doc_3|0.84|
+@end
+`
+
+value, err := glyph.ParseTabularLoose(tabularInput)
+if err != nil {
+	return err
+}
+
+// Result is a list of maps
+for _, item := range value.AsList() {
+	id := item.Get("id").AsStr()
+	score := item.Get("score").AsFloat()
+	fmt.Printf("%s: %.2f\n", id, score)
+}
+```
+
+## Error Handling
+
+```go
+result, err := glyph.Parse(input)
+if err != nil {
+	// Fatal parse error
+	return fmt.Errorf("parse failed: %w", err)
+}
+
+// Check for non-fatal errors
+if result.HasErrors() {
+	for _, e := range result.Errors {
+		fmt.Printf("Error at %s: %s\n", e.Pos, e.Message)
+	}
+}
+
+// Check warnings
+for _, w := range result.Warnings {
+	fmt.Printf("Warning: %s\n", w.Message)
+}
+
+value := result.Value
+```
+
+## Type Definitions
+
+```go
+import "github.com/glyph-lang/glyph/go/glyph"
+
+// GType enum
+const (
+	TypeNull   glyph.GType
+	TypeBool
+	TypeInt
+	TypeFloat
+	TypeStr
+	TypeBytes
+	TypeTime
+	TypeID
+	TypeList
+	TypeMap
+	TypeStruct
+	TypeSum
+)
+
+// Check type
+if value.Type() == glyph.TypeStruct {
+	struct_ := value.AsStruct()
+	fmt.Println(struct_.TypeName)
+}
+
+// Type predicates
+value.IsNull()
+value.IsBool()
+value.IsInt()
+// ... etc
+
+// RefID
+ref := value.AsID()
+fmt.Println(ref.Prefix) // "user"
+fmt.Println(ref.Value)  // "123"
+fmt.Println(ref.String()) // "^user:123"
+
+// MapEntry
+entry := glyph.MapEntry{
+	Key:   "name",
+	Value: glyph.Str("Alice"),
+}
+
+// StructValue
+struct_ := &glyph.StructValue{
+	TypeName: "Team",
+	Fields: []glyph.MapEntry{
+		{Key: "name", Value: glyph.Str("Arsenal")},
+		{Key: "rank", Value: glyph.Int(1)},
+	},
+}
+
+// SumValue
+sum := &glyph.SumValue{
+	Tag:   "Ok",
+	Value: glyph.Str("success"),
+}
+```
+
+## Real-World Examples
+
+### LLM Tool Call Handler
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/glyph-lang/glyph/go/glyph"
+)
+
+func handleToolCall(input string) error {
+	// Parse GLYPH from LLM (30-50% fewer tokens)
+	result, err := glyph.Parse(input)
+	if err != nil {
+		return err
+	}
+	
+	args := result.Value
+	action := args.Get("action").AsStr()
+	query := args.Get("query").AsStr()
+	maxResults := args.Get("max_results").AsInt()
+	
+	// Execute search
+	results := searchAPI(query, int(maxResults))
+	
+	// Return results in GLYPH
+	response := glyph.FromJSONLoose(results)
+	fmt.Println(glyph.CanonicalizeLoose(response))
+	
+	return nil
+}
+```
+
+### Data Serialization with Auto-Tabular
+
+```go
+package main
+
+import (
+	"github.com/glyph-lang/glyph/go/glyph"
+)
+
+func serializeUsers(users []User) string {
+	// Convert to JSON-compatible format
+	data := make([]map[string]interface{}, len(users))
+	for i, u := range users {
+		data[i] = map[string]interface{}{
+			"id":    u.ID,
+			"name":  u.Name,
+			"score": u.Score,
+		}
+	}
+	
+	// Convert to GLYPH (auto-tabular saves 35-65% tokens)
+	value := glyph.FromJSONLoose(data)
+	return glyph.CanonicalizeLoose(value)
+	// Output:
+	// @tab _ rows=3 cols=3 [id name score]
+	// |u1|Alice|95|
+	// |u2|Bob|87|
+	// |u3|Carol|92|
+	// @end
+}
+```
+
+### Caching with Fingerprints
+
+```go
+package main
+
+import (
+	"sync"
+	"github.com/glyph-lang/glyph/go/glyph"
+)
+
+type Cache struct {
+	mu    sync.RWMutex
+	store map[string]interface{}
+}
+
+func (c *Cache) GetOrCompute(query *glyph.GValue, compute func() interface{}) interface{} {
+	// Use fingerprint as cache key
+	key := glyph.FingerprintLoose(query)
+	
+	c.mu.RLock()
+	if result, ok := c.store[key]; ok {
+		c.mu.RUnlock()
+		return result
+	}
+	c.mu.RUnlock()
+	
+	// Compute and cache
+	result := compute()
+	c.mu.Lock()
+	c.store[key] = result
+	c.mu.Unlock()
+	
+	return result
+}
+```
+
+### Schema-Based Validation
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/glyph-lang/glyph/go/glyph"
+)
+
+func validateInput(input string, schema *glyph.Schema) error {
+	result, err := glyph.ParseWithSchema(input, schema)
+	if err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+	
+	if result.HasErrors() {
+		for _, e := range result.Errors {
+			fmt.Printf("Validation error: %s\n", e.Message)
+		}
+		return fmt.Errorf("validation failed")
+	}
+	
+	// Additional validation logic
+	value := result.Value
+	if err := validateBusinessRules(value); err != nil {
+		return err
+	}
+	
+	return nil
+}
+```
+
+## Performance Tips
+
+1. **Reuse schemas** - parse once, use many times
+2. **Object pooling** - internal pools reduce allocations
+3. **Auto-tabular** - automatic for lists of 3+ homogeneous maps
+4. **Fingerprinting** - efficient O(n) with string builder pooling
+5. **Streaming** - use ParseOptions for large inputs
+
+## Concurrency
+
+GValues are immutable and safe for concurrent reads:
+
+```go
+value := glyph.Str("shared")
+
+// Safe: concurrent reads
+var wg sync.WaitGroup
+for i := 0; i < 10; i++ {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fmt.Println(value.AsStr())
+	}()
+}
+wg.Wait()
+
+// Note: Building new values is not thread-safe
+// Create separate values in each goroutine if needed
+```
+
+## Testing Utilities
+
+```go
+import "testing"
+
+func TestGlyphRoundtrip(t *testing.T) {
+	original := glyph.Map(
+		glyph.Entry("x", glyph.Int(1)),
+		glyph.Entry("y", glyph.Int(2)),
+	)
+	
+	// Serialize
+	text := glyph.CanonicalizeLoose(original)
+	
+	// Parse back
+	result, err := glyph.Parse(text)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	
+	// Compare
+	if !glyph.EqualLoose(original, result.Value) {
+		t.Errorf("values not equal")
+	}
+}
+```

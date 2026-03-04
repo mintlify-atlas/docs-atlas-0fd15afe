@@ -1,0 +1,595 @@
+---
+title: "Fingerprinting"
+description: "SHA-256 state hashing for verification, caching, and concurrent safety"
+---
+
+## Overview
+
+**Fingerprinting** is the process of computing a deterministic SHA-256 hash of a GLYPH value's canonical form. This hash serves as a cryptographic fingerprint of the state.
+
+### What is a Fingerprint?
+
+```
+fingerprint = sha256( canonicalize(value) )
+```
+
+**Properties:**
+- **Deterministic**: Same data → same hash (across all languages)
+- **Collision-resistant**: Different data → different hash (with overwhelming probability)
+- **Compact**: 64 hex characters (256 bits)
+- **Cross-language**: Go, Python, JS, Rust produce identical hashes
+
+## Why Fingerprinting?
+
+<CardGroup cols={2}>
+  <Card title="State Verification" icon="shield-check">
+    Detect state divergence and corruption
+  </Card>
+  <Card title="Optimistic Concurrency" icon="clock">
+    Prevent lost updates in distributed systems
+  </Card>
+  <Card title="Cache Keys" icon="database">
+    Stable keys for LLM response caching
+  </Card>
+  <Card title="Deduplication" icon="copy">
+    Identify duplicate documents or messages
+  </Card>
+</CardGroup>
+
+## Computing Fingerprints
+
+### Basic Usage
+
+<CodeGroup>
+```python Python
+import glyph
+
+data = {"user": "alice", "count": 42}
+hash = glyph.fingerprint_loose(data)
+print(hash)
+# sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+
+# Short form (first 16 chars)
+short_hash = hash[7:23]  # Skip 'sha256:' prefix
+print(short_hash)
+# a1b2c3d4e5f67890
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+data := map[string]interface{}{
+    "user":  "alice",
+    "count": 42,
+}
+
+val := glyph.FromJSONLoose(data)
+hash := glyph.FingerprintLoose(val)
+fmt.Println(hash)
+// sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+
+// Short form (first 16 chars)
+shortHash := hash[7:23]  // Skip "sha256:" prefix
+fmt.Println(shortHash)
+// a1b2c3d4e5f67890
+```
+
+```typescript TypeScript
+import { fingerprintLoose } from 'glyph-js';
+
+const data = {user: 'alice', count: 42};
+const hash = fingerprintLoose(data);
+console.log(hash);
+// sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+
+// Short form (first 16 chars)
+const shortHash = hash.slice(7, 23);  // Skip 'sha256:' prefix
+console.log(shortHash);
+// a1b2c3d4e5f67890
+```
+
+```rust Rust
+use glyph_codec::{from_json, fingerprint_loose};
+use serde_json::json;
+
+let data = json!({"user": "alice", "count": 42});
+let gvalue = from_json(&data);
+let hash = fingerprint_loose(&gvalue);
+println!("{}", hash);
+// sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+
+// Short form (first 16 chars)
+let short_hash = &hash[7..23];  // Skip "sha256:" prefix
+println!("{}", short_hash);
+// a1b2c3d4e5f67890
+```
+</CodeGroup>
+
+### How It Works
+
+1. **Canonicalize** the value using Loose mode rules:
+   - Sort map keys bytewise
+   - Use deterministic float formatting
+   - Apply bare-string rules
+   - Normalize whitespace
+
+2. **Hash** the canonical UTF-8 bytes using SHA-256
+
+3. **Format** as `sha256:<64 hex chars>`
+
+**Example:**
+```
+Input:  {"b":1,"a":2}
+Canonical: {a=2 b=1}
+SHA-256: a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+Result: sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+```
+
+## Use Cases
+
+### State Verification
+
+Detect when state has changed unexpectedly.
+
+<CodeGroup>
+```python Python
+import glyph
+
+# Save checkpoint
+state = {"count": 5, "status": "active"}
+checkpoint = {
+    "state": state,
+    "hash": glyph.fingerprint_loose(state),
+    "timestamp": now(),
+}
+save_to_disk(checkpoint)
+
+# Load and verify
+loaded = load_from_disk()
+expected_hash = loaded["hash"]
+actual_hash = glyph.fingerprint_loose(loaded["state"])
+
+if actual_hash == expected_hash:
+    print("✓ Checkpoint integrity verified")
+    resume(loaded["state"])
+else:
+    print("✗ Checkpoint corrupted!")
+    raise CorruptionError()
+```
+
+```go Go
+import "github.com/Neumenon/glyph"
+
+// Save checkpoint
+state := map[string]interface{}{
+    "count":  5,
+    "status": "active",
+}
+
+val := glyph.FromJSONLoose(state)
+checkpoint := map[string]interface{}{
+    "state":     state,
+    "hash":      glyph.FingerprintLoose(val),
+    "timestamp": time.Now(),
+}
+
+saveToDisk(checkpoint)
+
+// Load and verify
+loaded := loadFromDisk()
+expectedHash := loaded["hash"].(string)
+actualHash := glyph.FingerprintLoose(glyph.FromJSONLoose(loaded["state"]))
+
+if actualHash == expectedHash {
+    fmt.Println("✓ Checkpoint integrity verified")
+    resume(loaded["state"])
+} else {
+    fmt.Println("✗ Checkpoint corrupted!")
+    return errors.New("corruption detected")
+}
+```
+
+```typescript TypeScript
+import { fingerprintLoose } from 'glyph-js';
+
+// Save checkpoint
+const state = {count: 5, status: 'active'};
+const checkpoint = {
+  state,
+  hash: fingerprintLoose(state),
+  timestamp: Date.now(),
+};
+
+await saveToDisk(checkpoint);
+
+// Load and verify
+const loaded = await loadFromDisk();
+const expectedHash = loaded.hash;
+const actualHash = fingerprintLoose(loaded.state);
+
+if (actualHash === expectedHash) {
+  console.log('✓ Checkpoint integrity verified');
+  resume(loaded.state);
+} else {
+  console.log('✗ Checkpoint corrupted!');
+  throw new CorruptionError();
+}
+```
+</CodeGroup>
+
+### Optimistic Concurrency Control
+
+Prevent lost updates when multiple agents modify shared state.
+
+```python
+import glyph
+from glyph import stream
+
+# Agent A reads state
+state = {"count": 5}
+base_hash = glyph.fingerprint_loose(state)
+# base_hash: sha256:abc123...
+
+# Agent A creates update
+patch = glyph.patch([("~", "count", 1)])
+
+# Agent A sends patch with base hash
+writer.write_frame(
+    sid=1,
+    seq=5,
+    kind="patch",
+    payload=patch,
+    base=base_hash[:16],  # First 16 chars: abc123...
+)
+
+# Server receives patch
+@handler.on_patch
+def handle_patch(sid, seq, payload, state, base):
+    # Verify base hash
+    current_hash = glyph.fingerprint_loose(state.value)
+    if not current_hash.startswith(base):
+        # State changed since Agent A read it
+        raise BaseMismatchError("State diverged")
+    
+    # Safe to apply
+    patch = glyph.parse_patch(payload)
+    new_state = glyph.apply_patch(state.value, patch)
+    return new_state
+```
+
+**Why this prevents lost updates:**
+
+```
+Scenario: Two agents update same state concurrently
+
+1. Agent A reads: {count=5}  hash=abc123...
+2. Agent B reads: {count=5}  hash=abc123...
+3. Agent A sends: base=abc123... ✓ Applied → {count=6} hash=def456...
+4. Agent B sends: base=abc123... ✗ Rejected (base != def456...)
+5. Agent B retries: reads {count=6} hash=def456...
+6. Agent B sends: base=def456... ✓ Applied → {count=7}
+```
+
+### Cache Keys for LLM Responses
+
+Generate stable cache keys for LLM prompts and responses.
+
+<CodeGroup>
+```python Python
+import glyph
+import redis
+
+redis_client = redis.Redis()
+
+def cached_llm_call(prompt: dict, model: str) -> str:
+    """Call LLM with caching."""
+    
+    # Create cache key from prompt fingerprint
+    cache_key_data = {
+        "model": model,
+        "prompt": prompt,
+        "version": "v2",
+    }
+    cache_key = glyph.fingerprint_loose(cache_key_data)
+    
+    # Check cache
+    cached = redis_client.get(cache_key)
+    if cached:
+        print("Cache hit!")
+        return cached.decode()
+    
+    # Call LLM
+    print("Cache miss, calling LLM...")
+    response = llm.generate(prompt)
+    
+    # Store in cache (24h TTL)
+    redis_client.setex(cache_key, 86400, response)
+    
+    return response
+
+# Usage
+prompt = {
+    "system": "You are a helpful assistant.",
+    "user": "What is the capital of France?",
+}
+
+response = cached_llm_call(prompt, model="gpt-4")
+# First call: Cache miss, calling LLM...
+
+response = cached_llm_call(prompt, model="gpt-4")
+# Second call: Cache hit!
+```
+
+```go Go
+import (
+    "github.com/Neumenon/glyph"
+    "github.com/go-redis/redis/v8"
+)
+
+func CachedLLMCall(prompt map[string]interface{}, model string) (string, error) {
+    // Create cache key from prompt fingerprint
+    cacheKeyData := map[string]interface{}{
+        "model":   model,
+        "prompt":  prompt,
+        "version": "v2",
+    }
+    
+    cacheKey := glyph.FingerprintLoose(glyph.FromJSONLoose(cacheKeyData))
+    
+    // Check cache
+    cached, err := redisClient.Get(ctx, cacheKey).Result()
+    if err == nil {
+        fmt.Println("Cache hit!")
+        return cached, nil
+    }
+    
+    // Call LLM
+    fmt.Println("Cache miss, calling LLM...")
+    response, err := llm.Generate(prompt)
+    if err != nil {
+        return "", err
+    }
+    
+    // Store in cache (24h TTL)
+    redisClient.Set(ctx, cacheKey, response, 24*time.Hour)
+    
+    return response, nil
+}
+```
+
+```typescript TypeScript
+import { fingerprintLoose } from 'glyph-js';
+import Redis from 'ioredis';
+
+const redis = new Redis();
+
+async function cachedLLMCall(prompt: any, model: string): Promise<string> {
+  // Create cache key from prompt fingerprint
+  const cacheKeyData = {
+    model,
+    prompt,
+    version: 'v2',
+  };
+  
+  const cacheKey = fingerprintLoose(cacheKeyData);
+  
+  // Check cache
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    console.log('Cache hit!');
+    return cached;
+  }
+  
+  // Call LLM
+  console.log('Cache miss, calling LLM...');
+  const response = await llm.generate(prompt);
+  
+  // Store in cache (24h TTL)
+  await redis.setex(cacheKey, 86400, response);
+  
+  return response;
+}
+```
+</CodeGroup>
+
+### Document Deduplication
+
+Identify duplicate documents in a corpus.
+
+```python
+import glyph
+from collections import defaultdict
+
+def find_duplicates(documents: list[dict]) -> dict[str, list[int]]:
+    """Find duplicate documents by fingerprint."""
+    
+    fingerprints = defaultdict(list)
+    
+    for i, doc in enumerate(documents):
+        fp = glyph.fingerprint_loose(doc)
+        fingerprints[fp].append(i)
+    
+    # Return only duplicates (fingerprints with 2+ docs)
+    duplicates = {fp: indices for fp, indices in fingerprints.items() if len(indices) > 1}
+    
+    return duplicates
+
+# Usage
+docs = [
+    {"title": "Intro", "content": "Hello world"},
+    {"title": "Guide", "content": "How to use"},
+    {"title": "Intro", "content": "Hello world"},  # Duplicate of doc 0
+    {"title": "FAQ", "content": "Questions"},
+]
+
+dupes = find_duplicates(docs)
+print(f"Found {len(dupes)} sets of duplicates")
+for fp, indices in dupes.items():
+    print(f"  Documents {indices} are identical (hash: {fp[:16]}...)")
+
+# Output:
+# Found 1 sets of duplicates
+#   Documents [0, 2] are identical (hash: sha256:a1b2c3d4...)
+```
+
+### Agent State Sync
+
+Sync state across distributed agent processes.
+
+```python
+import glyph
+from glyph import stream
+
+class AgentStateSyncer:
+    def __init__(self, writer, reader):
+        self.writer = writer
+        self.reader = reader
+        self.local_state = {}
+        self.local_hash = None
+    
+    def update_local(self, changes: dict):
+        """Update local state and broadcast patch."""
+        
+        # Compute patch
+        patch_ops = [("=", k, v) for k, v in changes.items()]
+        patch = glyph.patch(patch_ops)
+        
+        # Send with current state hash
+        self.writer.write_frame(
+            sid=1,
+            seq=self.next_seq(),
+            kind="patch",
+            payload=patch,
+            base=self.local_hash[:16] if self.local_hash else None,
+        )
+        
+        # Apply locally
+        self.local_state.update(changes)
+        self.local_hash = glyph.fingerprint_loose(self.local_state)
+    
+    def sync_from_remote(self, frame):
+        """Sync state from remote agent."""
+        
+        if frame.kind == "patch":
+            # Verify base hash
+            if frame.base and self.local_hash:
+                if not self.local_hash.startswith(frame.base):
+                    # State diverged, request full sync
+                    self.request_full_state()
+                    return
+            
+            # Apply patch
+            patch = glyph.parse_patch(frame.payload)
+            self.local_state = glyph.apply_patch(self.local_state, patch)
+            self.local_hash = glyph.fingerprint_loose(self.local_state)
+        
+        elif frame.kind == "doc":
+            # Full state sync
+            self.local_state = glyph.parse(frame.payload)
+            self.local_hash = glyph.fingerprint_loose(self.local_state)
+```
+
+## Implementation Details
+
+### Canonicalization Mode
+
+<Info>
+**Sender and receiver MUST agree on canonicalization mode** (Strict vs Loose).
+</Info>
+
+- **Loose mode** (most common): Schema-optional, JSON-compatible
+- **Strict mode**: Schema-required, packed encoding
+
+Mixing modes produces different hashes for the same logical data.
+
+### Short Hashes
+
+For space efficiency, use the first 16 hex characters (64 bits) of the hash:
+
+```python
+full_hash = "sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890"
+short_hash = full_hash[7:23]  # "a1b2c3d4e5f67890"
+```
+
+**Collision probability** with 64-bit prefix:
+- 1 million hashes: ~0.00003% chance of collision
+- 1 billion hashes: ~27% chance of collision
+
+Use full 256-bit hash for high-security applications.
+
+### Cross-Language Consistency
+
+GLYPH guarantees **byte-identical** canonical forms across Go, Python, JavaScript, and Rust.
+
+**Test case:**
+```python
+# Python
+data = {"user": "alice", "count": 42}
+hash_py = glyph.fingerprint_loose(data)
+# sha256:a1b2c3d4...
+```
+
+```go
+// Go
+data := map[string]interface{}{"user": "alice", "count": 42}
+hashGo := glyph.FingerprintLoose(glyph.FromJSONLoose(data))
+// sha256:a1b2c3d4...
+```
+
+```typescript
+// TypeScript
+const data = {user: 'alice', count: 42};
+const hashTS = fingerprintLoose(data);
+// sha256:a1b2c3d4...
+```
+
+**Result:** `hash_py === hashGo === hashTS` ✓
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always Verify on Critical Paths" icon="shield-check">
+    For checkpoints, distributed state, or financial data, always verify fingerprints before applying changes.
+  </Accordion>
+  
+  <Accordion title="Use Short Hashes for Efficiency" icon="gauge">
+    For logs, debug output, or low-risk scenarios, use 16-char short hashes to save space.
+  </Accordion>
+  
+  <Accordion title="Version Your Cache Keys" icon="code-branch">
+    Include a version field in cache key data to invalidate caches after schema changes.
+    
+    ```python
+    cache_key_data = {
+        "prompt": prompt,
+        "model": model,
+        "version": "v2",  # Bump to invalidate old caches
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Log Hashes for Debugging" icon="bug">
+    Include state hashes in logs to trace state evolution:
+    
+    ```python
+    logger.info(f"State updated: {short_hash} -> {new_short_hash}")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Patches" href="/advanced/patches" icon="code-merge">
+    Use fingerprints for safe patch application
+  </Card>
+  <Card title="GS1 Streaming" href="/advanced/gs1-streaming" icon="stream">
+    Leverage base hashes in streaming protocol
+  </Card>
+  <Card title="Loose Mode" href="/advanced/loose-mode" icon="sparkles">
+    Understand canonical form rules
+  </Card>
+  <Card title="Agent Patterns" href="/guides/agents" icon="robot">
+    Apply fingerprinting in agent systems
+  </Card>
+</CardGroup>

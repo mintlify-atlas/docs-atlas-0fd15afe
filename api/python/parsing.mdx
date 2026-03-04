@@ -1,0 +1,468 @@
+---
+title: "Parsing"
+description: "Parse GLYPH text format into GValue objects"
+---
+
+## Overview
+
+The parsing module converts GLYPH text format into `GValue` objects. It supports the full GLYPH-Loose syntax including bare strings, quoted strings, numbers, collections, structs, sum types, reference IDs, and tabular format.
+
+## parse()
+
+Parse GLYPH text into a GValue.
+
+<ParamField path="text" type="str" required>
+  GLYPH-formatted text to parse
+</ParamField>
+
+<ResponseField name="return" type="GValue">
+  The parsed value
+</ResponseField>
+
+```python
+import glyph
+
+# Parse a map
+v = glyph.parse('{action=search query="weather in NYC"}')
+print(v.get("action").as_str())  # "search"
+print(v.get("query").as_str())   # "weather in NYC"
+
+# Parse a struct
+team = glyph.parse('Team{name=Arsenal rank=1}')
+print(team.as_struct().type_name)  # "Team"
+print(team.get("name").as_str())   # "Arsenal"
+```
+
+**Raises:** `ValueError` - If the text cannot be parsed
+
+## parse_loose()
+
+Alias for `parse()`. Both functions are identical and support loose parsing rules.
+
+<ParamField path="text" type="str" required>
+  GLYPH-formatted text to parse
+</ParamField>
+
+<ResponseField name="return" type="GValue">
+  The parsed value
+</ResponseField>
+
+```python
+import glyph
+
+v = glyph.parse_loose('[1 2 3]')
+print(len(v))  # 3
+```
+
+## Supported Syntax
+
+### Null Values
+
+Null can be represented as `∅`, `_`, `null`, or `nil`:
+
+```python
+v1 = glyph.parse('∅')
+v2 = glyph.parse('_')
+v3 = glyph.parse('null')
+v4 = glyph.parse('nil')
+
+assert v1.is_null()
+assert v2.is_null()
+assert v3.is_null()
+assert v4.is_null()
+```
+
+### Booleans
+
+Booleans can be represented as `t`/`f` or `true`/`false`:
+
+```python
+t1 = glyph.parse('t')
+t2 = glyph.parse('true')
+f1 = glyph.parse('f')
+f2 = glyph.parse('false')
+
+assert t1.as_bool() == True
+assert t2.as_bool() == True
+assert f1.as_bool() == False
+assert f2.as_bool() == False
+```
+
+### Numbers
+
+Integers and floating-point numbers:
+
+```python
+# Integers
+v1 = glyph.parse('42')
+v2 = glyph.parse('-7')
+print(v1.as_int())  # 42
+print(v2.as_int())  # -7
+
+# Floats
+v3 = glyph.parse('3.14')
+v4 = glyph.parse('1.5e10')
+v5 = glyph.parse('-2.5e-3')
+print(v3.as_float())  # 3.14
+print(v4.as_float())  # 15000000000.0
+print(v5.as_float())  # -0.0025
+```
+
+### Strings
+
+Bare strings (no quotes needed for safe identifiers):
+
+```python
+v = glyph.parse('hello')
+print(v.as_str())  # "hello"
+
+v2 = glyph.parse('foo_bar')
+print(v2.as_str())  # "foo_bar"
+```
+
+Quoted strings (for strings with spaces or special characters):
+
+```python
+v = glyph.parse('"hello world"')
+print(v.as_str())  # "hello world"
+
+v2 = glyph.parse('"say \\"hi\\""')
+print(v2.as_str())  # 'say "hi"'
+
+v3 = glyph.parse('"line1\\nline2"')
+print(v3.as_str())  # "line1\nline2"
+```
+
+### Bytes
+
+Base64-encoded bytes:
+
+```python
+v = glyph.parse('b64"SGVsbG8="')
+print(v.as_bytes())  # b'Hello'
+```
+
+### Reference IDs
+
+IDs with optional prefix:
+
+```python
+# With prefix
+v1 = glyph.parse('^user:123')
+ref = v1.as_id()
+print(ref.prefix)  # "user"
+print(ref.value)   # "123"
+
+# Without prefix
+v2 = glyph.parse('^abc')
+ref2 = v2.as_id()
+print(ref2.prefix)  # ""
+print(ref2.value)   # "abc"
+
+# Quoted IDs
+v3 = glyph.parse('^"user:special-123"')
+ref3 = v3.as_id()
+print(ref3.value)   # "user:special-123"
+```
+
+### Lists
+
+Space-separated elements in brackets:
+
+```python
+# Empty list
+v = glyph.parse('[]')
+print(len(v))  # 0
+
+# List of integers
+v = glyph.parse('[1 2 3]')
+for item in v.as_list():
+    print(item.as_int())
+# Output: 1, 2, 3
+
+# Mixed types
+v = glyph.parse('[1 "hello" true]')
+print(v.index(0).as_int())   # 1
+print(v.index(1).as_str())   # "hello"
+print(v.index(2).as_bool())  # True
+
+# Nested lists
+v = glyph.parse('[[1 2] [3 4]]')
+print(v.index(0).index(0).as_int())  # 1
+```
+
+### Maps
+
+Key-value pairs in braces. Keys and values separated by `=` or `:`:
+
+```python
+# Empty map
+v = glyph.parse('{}')
+print(len(v))  # 0
+
+# Simple map
+v = glyph.parse('{a=1 b=2}')
+print(v.get('a').as_int())  # 1
+print(v.get('b').as_int())  # 2
+
+# Using colon separator
+v = glyph.parse('{name:"Alice" age:30}')
+print(v.get('name').as_str())  # "Alice"
+print(v.get('age').as_int())   # 30
+
+# Nested maps
+v = glyph.parse('{user={name="Bob" id=42}}')
+user = v.get('user')
+print(user.get('name').as_str())  # "Bob"
+```
+
+### Structs
+
+Typed structures with a name:
+
+```python
+# Parse a struct
+v = glyph.parse('Person{name="Alice" age=30}')
+struct = v.as_struct()
+print(struct.type_name)         # "Person"
+print(v.get('name').as_str())   # "Alice"
+print(v.get('age').as_int())    # 30
+
+# Empty struct
+v = glyph.parse('Empty{}')
+print(v.as_struct().type_name)  # "Empty"
+
+# Nested structs
+v = glyph.parse('Team{name=Arsenal manager=Person{name="Arteta"}}')
+team = v.as_struct()
+manager = v.get('manager').as_struct()
+print(manager.type_name)  # "Person"
+```
+
+### Sum Types
+
+Tagged unions with optional payload:
+
+```python
+# Sum with value
+v = glyph.parse('Some(42)')
+sum_val = v.as_sum()
+print(sum_val.tag)          # "Some"
+print(sum_val.value.as_int())  # 42
+
+# Sum without value
+v = glyph.parse('None()')
+sum_val = v.as_sum()
+print(sum_val.tag)    # "None"
+print(sum_val.value)  # None
+
+# Complex payload
+v = glyph.parse('Result({status=ok data=[1 2 3]})')
+sum_val = v.as_sum()
+data = sum_val.value.get('data')
+print(len(data))  # 3
+```
+
+### Tabular Format
+
+Compact representation for lists of homogeneous maps:
+
+```python
+tabular_text = """@tab _ [name age]
+|Alice|30|
+|Bob|25|
+|Carol|35|
+@end"""
+
+v = glyph.parse(tabular_text)
+print(len(v))  # 3
+
+for row in v.as_list():
+    name = row.get('name').as_str()
+    age = row.get('age').as_int()
+    print(f"{name}: {age}")
+
+# Output:
+# Alice: 30
+# Bob: 25
+# Carol: 35
+```
+
+## Parser Options
+
+The parser automatically handles:
+
+- **Whitespace**: Leading/trailing whitespace is ignored
+- **Newlines**: Can be used to separate elements in collections
+- **Commas**: Optional commas between elements
+- **Comments**: Not currently supported (planned for future version)
+- **Unicode**: Full UTF-8 support including emoji and international characters
+
+```python
+# All of these are equivalent
+v1 = glyph.parse('[1 2 3]')
+v2 = glyph.parse('[1, 2, 3]')
+v3 = glyph.parse('[1,2,3]')
+v4 = glyph.parse('''[
+    1
+    2
+    3
+]''')
+
+assert len(v1) == len(v2) == len(v3) == len(v4) == 3
+```
+
+## Error Handling
+
+The parser raises `ValueError` with descriptive messages:
+
+```python
+import glyph
+
+try:
+    v = glyph.parse('{invalid syntax')
+except ValueError as e:
+    print(f"Parse error: {e}")
+    # Parse error: unterminated map
+
+try:
+    v = glyph.parse('[1 2 "unterminated')
+except ValueError as e:
+    print(f"Parse error: {e}")
+    # Parse error: unterminated string
+
+try:
+    v = glyph.parse('b64"invalid!@#"')
+except ValueError as e:
+    print(f"Parse error: {e}")
+    # Parse error: invalid base64
+```
+
+## Performance Tips
+
+### Batch Parsing
+
+For parsing multiple values, parse them individually:
+
+```python
+texts = ['{a=1}', '{b=2}', '{c=3}']
+values = [glyph.parse(text) for text in texts]
+```
+
+### Streaming Large Lists
+
+For very large lists, consider parsing as tabular format:
+
+```python
+# More efficient for large datasets
+tabular = """@tab _ [id value]
+|1|data1|
+|2|data2|
+...
+@end"""
+
+v = glyph.parse(tabular)
+```
+
+## Examples
+
+### Parse API Response
+
+```python
+import glyph
+
+# Parse a GLYPH API response
+response_text = '''
+{
+    status=ok
+    timestamp="2025-03-15T10:30:00Z"
+    data=[
+        {id=1 name="Alice" score=95}
+        {id=2 name="Bob" score=87}
+    ]
+}
+'''
+
+v = glyph.parse(response_text)
+print(v.get('status').as_str())  # "ok"
+
+data = v.get('data').as_list()
+for item in data:
+    id_val = item.get('id').as_int()
+    name = item.get('name').as_str()
+    score = item.get('score').as_int()
+    print(f"{id_val}: {name} scored {score}")
+```
+
+### Parse Configuration
+
+```python
+import glyph
+
+config_text = '''
+AppConfig{
+    database={
+        host="localhost"
+        port=5432
+        name="mydb"
+    }
+    cache={
+        enabled=true
+        ttl=3600
+    }
+    features=[search analytics export]
+}
+'''
+
+config = glyph.parse(config_text)
+struct = config.as_struct()
+print(struct.type_name)  # "AppConfig"
+
+db = config.get('database')
+print(db.get('host').as_str())  # "localhost"
+print(db.get('port').as_int())  # 5432
+
+cache = config.get('cache')
+print(cache.get('enabled').as_bool())  # True
+
+features = config.get('features').as_list()
+for feature in features:
+    print(feature.as_str())
+# Output: search, analytics, export
+```
+
+### Roundtrip Parsing
+
+```python
+import glyph
+
+# Original data
+original = {
+    "action": "search",
+    "query": "weather in NYC",
+    "max_results": 10
+}
+
+# Convert to GLYPH
+glyph_text = glyph.json_to_glyph(original)
+print(glyph_text)
+# {action=search max_results=10 query="weather in NYC"}
+
+# Parse back
+v = glyph.parse(glyph_text)
+
+# Access values
+print(v.get('action').as_str())        # "search"
+print(v.get('query').as_str())         # "weather in NYC"
+print(v.get('max_results').as_int())   # 10
+
+# Convert back to JSON
+result = glyph.to_json(v)
+assert result == original
+```
+
+## Related Functions
+
+- [json_to_glyph()](/api/python/json-bridge#json-to-glyph) - Convert JSON directly to GLYPH format
+- [glyph_to_json()](/api/python/json-bridge#glyph-to-json) - Parse GLYPH to JSON
+- [emit()](/api/python/json-bridge#emit) - Convert GValue back to GLYPH text
