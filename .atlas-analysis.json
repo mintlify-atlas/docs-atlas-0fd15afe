@@ -1,0 +1,147 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "GLYPH",
+  "projectDescription": "Token-efficient serialization format for AI agents with 40-60% token savings over JSON",
+  "theme": "aspen",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4f46e5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/format",
+              "concepts/token-savings",
+              "concepts/streaming-validation",
+              "concepts/tabular-mode"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/ai-agents",
+              "guides/tool-calling",
+              "guides/state-management",
+              "guides/batch-data",
+              "guides/json-interop"
+            ]
+          },
+          {
+            "group": "Language SDKs",
+            "pages": [
+              "sdks/python",
+              "sdks/javascript",
+              "sdks/go",
+              "sdks/rust",
+              "sdks/c"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/loose-mode",
+              "advanced/gs1-streaming",
+              "advanced/patches",
+              "advanced/fingerprinting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python API",
+            "pages": [
+              "api/python/overview",
+              "api/python/core",
+              "api/python/parsing",
+              "api/python/json-bridge"
+            ]
+          },
+          {
+            "group": "JavaScript API",
+            "pages": [
+              "api/javascript/overview",
+              "api/javascript/core",
+              "api/javascript/parsing",
+              "api/javascript/streaming"
+            ]
+          },
+          {
+            "group": "Go API",
+            "pages": [
+              "api/go/overview",
+              "api/go/core",
+              "api/go/parsing",
+              "api/go/streaming"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Resources",
+        "groups": [
+          {
+            "group": "Research",
+            "pages": [
+              "research/benchmarks",
+              "research/llm-accuracy",
+              "research/performance"
+            ]
+          },
+          {
+            "group": "Specifications",
+            "pages": [
+              "specs/loose-mode",
+              "specs/gs1-protocol",
+              "specs/type-system"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/cookbook",
+              "examples/patterns",
+              "examples/integrations"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "40-60% token reduction vs JSON",
+    "Streaming validation with early error detection",
+    "Auto-tabular mode for homogeneous lists",
+    "Multi-language support (Python, Go, JS, Rust, C)",
+    "State fingerprinting with SHA-256",
+    "Bidirectional JSON conversion",
+    "Human-readable text format",
+    "Schema-optional operation"
+  ],
+  "publicApiSurface": [
+    "parse() / glyph.parse()",
+    "emit() / glyph.emit()",
+    "json_to_glyph() / fromJSON()",
+    "glyph_to_json() / toJSON()",
+    "StreamingValidator",
+    "ToolRegistry",
+    "canonicalize_loose()",
+    "fingerprint_loose()",
+    "parse_patch() / apply_patch()",
+    "GS1 frame protocol (stream.FrameWriter/Reader)"
+  ]
+}
